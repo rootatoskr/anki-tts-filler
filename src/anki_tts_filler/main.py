@@ -6,8 +6,8 @@
     uv run anki-tts-filler
 
 Anki має бути запущений з увімкненим аддоном AnkiConnect.
-Поля, ключ старту картки і мапу аудіо-полів задаєте у fields.toml.
-Вставте список карток у cards.txt (в директорії, звідки запускаєте) і запустіть скрипт.
+Поля, ключ старту картки і мапа аудіо-полів задаються у fields.toml.
+Список карток вставляється у cards.txt (у директорії запуску), після чого запускається скрипт.
 """
 
 import sys
@@ -25,19 +25,19 @@ def main():
     try:
         invoke('version')
     except Exception:
-        print('Не вдалося підключитись до Anki (http://127.0.0.1:8765). Переконайтеся, що Anki відкритий і аддон AnkiConnect увімкнений.')
+        print('Не вдалося підключитись до Anki (http://127.0.0.1:8765). Anki має бути відкритий з увімкненим аддоном AnkiConnect.')
         sys.exit(1)
 
     if not os.path.isfile(INPUT_PATH):
         open(INPUT_PATH, 'w').close()
-        print(f'Створено {INPUT_FILE}. Вставте картки і запустіть знову.')
+        print(f'Створено {INPUT_FILE}. Картки потрібно вставити і запустити скрипт повторно.')
         sys.exit(0)
 
     with open(INPUT_PATH, encoding='utf-8') as f:
         text = f.read()
 
     if not text.strip():
-        print(f'{INPUT_FILE} порожній. Вставте картки і запустіть знову.')
+        print(f'{INPUT_FILE} порожній. Картки потрібно вставити і запустити скрипт повторно.')
         sys.exit(0)
 
     if text.strip() in ERROR_LINES:
@@ -46,7 +46,7 @@ def main():
 
     cards = split_cards(text)
     if not cards:
-        print('Карток не знайдено. Перевір формат вводу.')
+        print('Карток не знайдено. Формат вводу потрібно перевірити.')
         sys.exit(1)
 
     valid = []

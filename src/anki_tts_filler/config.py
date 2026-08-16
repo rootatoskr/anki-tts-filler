@@ -34,7 +34,7 @@ _fields_path = os.path.abspath(FIELDS_FILE)
 if not os.path.isfile(_fields_path):
     with open(_fields_path, 'w', encoding='utf-8') as f:
         f.write(_FIELDS_TEMPLATE)
-    print(f'Створено {FIELDS_FILE}. Задайте deck_name/model_name/fields/start_key/audio_fields і запустіть знову.')
+    print(f'Створено {FIELDS_FILE}. Поля deck_name/model_name/fields/start_key/audio_fields потрібно задати і запустити скрипт повторно.')
     sys.exit(0)
 
 with open(_fields_path, 'rb') as f:
