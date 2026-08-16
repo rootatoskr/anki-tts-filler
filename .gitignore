@@ -1,0 +1,80 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE / Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Secrets / Environment
+.env
+.env.*
+!.env.example
+
+# Python: bytecode & cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Python: packaging
+build/
+dist/
+*.egg-info/
+*.egg
+wheels/
+*.spec
+MANIFEST
+
+# Python: virtual environments
+.venv/
+venv/
+env/
+
+# Python: linters & type checkers
+.ruff_cache/
+.mypy_cache/
+.dmypy.json
+.pyre/
+.pytype/
+
+# Python: testing & coverage
+.tox/
+.nox/
+.coverage
+.coverage.*
+.pytest_cache/
+.hypothesis/
+htmlcov/
+coverage.xml
+
+# Database
+*.sqlite3
+*.sqlite3-journal
+
+# Logs
+*.log
+logs/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Node
+node_modules/
+npm-debug.log*
+
+# Docker
+.docker/
+
+# Claude
+.claude/
+CLAUDE.md
+
+# Project
+cards.txt
+fields.toml
+audio_cache/
+

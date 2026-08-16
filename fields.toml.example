@@ -1,0 +1,16 @@
+# Мають точно збігатися з назвами вже створених у Anki колоди й notetype
+deck_name = "MyDeck::MySubdeck"
+model_name = "MyNoteType"
+
+# Ключ, з якого починається нова картка в cards.txt
+start_key = "field_one"
+
+# Поля, які вводяться вручну в cards.txt (мають збігатися з полями нотетайпу в Anki)
+fields = [
+    "field_one",
+    "field_two",
+]
+
+# Аудіо-поле: з якого текстового поля згенерувати аудіо
+[audio_fields]
+audio_field_one = "field_one"
