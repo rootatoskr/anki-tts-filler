@@ -2,9 +2,10 @@ import asyncio
 import hashlib
 import os
 import re
+import shutil
 import subprocess
 import edge_tts
-from .config import TTS_VOICE, TTS_RATE
+from .config import TTS_VOICE, TTS_RATE, MEDIA_PREFIX
 
 
 def strip_html(text):
@@ -15,9 +16,18 @@ def sound_tag(path):
     return f'[sound:{os.path.basename(path)}]'
 
 
+def ffmpeg_available():
+    return shutil.which('ffmpeg') is not None
+
+
+def media_pattern():
+    return f'{MEDIA_PREFIX}*.mp3'
+
+
 def _fname(text):
-    h = hashlib.md5(text.encode()).hexdigest()[:16]
-    return f'langdeck_{h}.mp3'
+    # Голос і темп входять у ключ кешу, щоб зміна TTS_VOICE/TTS_RATE не перевикористовувала старе аудіо
+    h = hashlib.md5(f'{text}|{TTS_VOICE}|{TTS_RATE}'.encode()).hexdigest()[:16]
+    return f'{MEDIA_PREFIX}{h}.mp3'
 
 
 def _trim_silence(path):
