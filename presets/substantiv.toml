@@ -1,0 +1,8 @@
+deck_name = "language-no::no-substantiv"
+model_name = "type-language-no-substantiv"
+
+[audio_fields]
+audio_substantiv = "substantiv"
+audio_bestemt_ental = "bestemt_ental"
+audio_ubestemt_flertall = "ubestemt_flertall"
+audio_bestemt_flertall = "bestemt_flertall"

@@ -1,0 +1,8 @@
+deck_name = "language-no::no-verb"
+model_name = "type-language-no-verb"
+
+[audio_fields]
+audio_infinitiv = "infinitiv"
+audio_presens = "presens"
+audio_preteritum = "preteritum"
+audio_presens_perfektum = "presens_perfektum"
