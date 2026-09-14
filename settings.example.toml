@@ -1,0 +1,34 @@
+# Налаштування режиму audio. anki_url збігається з ANKICONNECT_URL у config.py.
+anki_url = "http://127.0.0.1:8765"
+cache_dir = ".cache/tts"
+work_dir = ".cache/work"
+concurrency = 8
+
+[voice]
+no = "nb-NO-FinnNeural"
+uk = "uk-UA-PolinaNeural"
+rate_no = "-40%"
+rate_uk = "+0%"
+volume_no = "+0%"
+volume_uk = "+0%"
+
+[gap]
+# Пауза після норвезької: час на згадати переклад.
+after_no = 1.2
+# Пауза після української: коротка, далі йде повтор норвезької.
+after_uk = 0.4
+# Пауза між формами однієї сторони (infinitiv/presens/preteritum).
+within_side = 0.5
+between_cards = 1.5
+
+[content]
+# Скільки разів норвезька повторюється після перекладу: no -> uk -> no (repeat_no разів)
+repeat_no = 1
+use_anki_media = true
+# Поле note містить і пари "no - uk", і суцільні українські пояснення.
+# Пояснення пропускаються, але розбір лишається евристичним.
+include_note = false
+
+[output]
+dir = "out"
+bitrate = "48k"
