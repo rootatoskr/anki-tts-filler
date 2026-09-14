@@ -1,5 +1,6 @@
 deck_name = "language-no::no-substantiv"
 model_name = "type-language-no-substantiv"
+translation_field = "substantiv_uk"
 
 [audio_fields]
 audio_substantiv = "substantiv"

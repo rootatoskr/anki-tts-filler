@@ -1,5 +1,6 @@
 deck_name = "language-no::no-verb"
 model_name = "type-language-no-verb"
+translation_field = "infinitiv_uk"
 
 [audio_fields]
 audio_infinitiv = "infinitiv"

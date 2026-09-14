@@ -1,5 +1,6 @@
 deck_name = "language-no::no-ordforråd"
 model_name = "type-language-no-basic"
+translation_field = "production"
 
 [audio_fields]
 audio = "recognition"
