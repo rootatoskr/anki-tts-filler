@@ -1,0 +1,9 @@
+# type-language-no-cloze зараз не має жодної ноти в колекції (перевірено
+# через AnkiConnect findCards) - deck_name невідомий, задай перед тим, як
+# створювати картки цим пресетом. Для audio-режиму deck_name не потрібен.
+deck_name = "MyDeck::MySubdeck"
+model_name = "type-language-no-cloze"
+translation_field = "translation_1"
+
+[audio_fields]
+audio_1 = "example_1"
