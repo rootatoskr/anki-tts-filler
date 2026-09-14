@@ -76,4 +76,8 @@ CLAUDE.md
 # Project
 cards.txt
 audio_cache/
+settings.toml
+out/
+*.mp3
+.cache/
 
