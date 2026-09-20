@@ -1,4 +1,6 @@
-# Налаштування режиму audio. anki_url збігається з ANKICONNECT_URL у config.py.
+# Налаштування обох режимів. Режим cards бере звідси anki_url, concurrency
+# і норвезький голос (voice.no, voice.rate_no, voice.volume_no); секції gap,
+# content і output стосуються лише режиму audio.
 anki_url = "http://127.0.0.1:8765"
 cache_dir = ".cache/tts"
 work_dir = ".cache/work"
@@ -13,7 +15,7 @@ volume_no = "+0%"
 volume_uk = "+0%"
 
 [gap]
-# Пауза після норвезької: час на згадати переклад.
+# Пауза після норвезької: час на згадати переклад. 0 - без паузи.
 after_no = 1.2
 # Пауза після української: коротка, далі йде повтор норвезької.
 after_uk = 0.4
@@ -28,6 +30,8 @@ use_anki_media = true
 # Поле note містить і пари "no - uk", і суцільні українські пояснення.
 # Пояснення пропускаються, але розбір лишається евристичним.
 include_note = false
+# Перемішувати порядок карток при кожному запуску.
+shuffle = true
 
 [output]
 dir = "out"
