@@ -1,8 +1,8 @@
-"""Синтез мовлення через edge-tts із кешем на диску (для режиму audio).
+"""Синтез мовлення через edge-tts із кешем на диску.
 
-Не плутати з audio.py: та генерація для режиму cards озвучує коротке
-поле й одразу заливає файл в Anki, тут - кеш по (текст, голос, темп,
-гучність) для довгих прослуховувальних доріжок.
+Спільне ядро обох режимів: запис через тимчасовий ``.part``, відсів порожніх
+відповідей edge-tts, повтори і спільний семафор. Режим cards підставляє свою
+схему імен і обрізання тиші через підклас у audio.py.
 """
 
 import asyncio
@@ -10,6 +10,9 @@ import hashlib
 import os
 
 import edge_tts
+
+RETRIES = 3
+RETRY_DELAY = 1
 
 
 class TtsError(Exception):
@@ -35,9 +38,14 @@ class TtsCache:
         key = '|'.join([text, voice, rate, volume]).encode()
         return os.path.join(self.cache_dir, hashlib.sha1(key).hexdigest() + '.mp3')
 
+    def postprocess(self, path):
+        """Обробка щойно синтезованого файлу перед тим, як він стане кешем."""
+
     async def synthesize(self, text, voice, rate, volume):
         path = self.path_for(text, voice, rate, volume)
-        if os.path.exists(path):
+        # Порожній файл лишається від обірваних запусків старих версій -
+        # це не кеш, його треба озвучити наново
+        if os.path.exists(path) and os.path.getsize(path) > 0:
             self.hits += 1
             return path
 
@@ -47,20 +55,38 @@ class TtsCache:
         if task is None:
             task = asyncio.create_task(self._render(text, voice, rate, volume, path))
             self._inflight[path] = task
-        return await task
+        else:
+            self.hits += 1
+        try:
+            return await task
+        finally:
+            self._inflight.pop(path, None)
 
     async def _render(self, text, voice, rate, volume, path):
         async with self._semaphore:
             partial = '%s.%d.part' % (path, os.getpid())
-            try:
-                await edge_tts.Communicate(text, voice, rate=rate, volume=volume).save(partial)
-            except Exception as exc:
-                if os.path.exists(partial):
-                    os.remove(partial)
-                raise TtsError('не вдалося озвучити %r голосом %s: %s' % (text, voice, exc)) from exc
+            for attempt in range(RETRIES):
+                try:
+                    await edge_tts.Communicate(text, voice, rate=rate, volume=volume).save(partial)
+                    break
+                except Exception as exc:
+                    _remove(partial)
+                    if attempt == RETRIES - 1:
+                        raise TtsError('не вдалося озвучити %r голосом %s: %s' % (text, voice, exc)) from exc
+                    await asyncio.sleep(RETRY_DELAY)
             if os.path.getsize(partial) == 0:
-                os.remove(partial)
+                _remove(partial)
                 raise TtsError('edge-tts повернув порожній файл для %r' % text)
+            try:
+                self.postprocess(partial)
+            except Exception as exc:
+                _remove(partial)
+                raise TtsError('не вдалося обробити аудіо для %r: %s' % (text, exc)) from exc
             os.replace(partial, path)
         self.misses += 1
         return path
+
+
+def _remove(path):
+    if os.path.exists(path):
+        os.remove(path)
