@@ -9,7 +9,8 @@ Anki через AnkiConnect: заповнення карток TTS-аудіо і
 
 Anki має бути запущений з увімкненим аддоном AnkiConnect. Схема полів (яка
 колода/notetype, які поля норвезькі/переклад/аудіо) задається спільно для
-обох режимів у presets/<preset>.toml.
+обох режимів у presets/<preset>.toml, голос і адреса AnkiConnect - у
+settings.toml.
 
 Режим cards: список карток вставляється у cards.txt (у директорії запуску),
 до Anki додаються нові ноти.
@@ -90,14 +91,30 @@ def read_cards(input_path):
     return text
 
 
-def build_audio_map(valid, preset, cache_dir, client):
+def load_settings_or_exit():
+    # Налаштування спільні для обох режимів, тому й створюються однаково
+    if not os.path.exists(config.SETTINGS_FILE):
+        config.write_settings_template()
+        print(f'Створено {config.SETTINGS_FILE}. Налаштування потрібно перевірити і запустити скрипт повторно.')
+        sys.exit(0)
+    return config.load_settings()
+
+
+def build_audio_map(valid, preset, cache_dir, client, settings):
     texts = set()
     for _, card in valid:
         for src in set(preset.audio_fields.values()):
             text = strip_html(card.get(src, ''))
             if text:
                 texts.add(text)
-    audio_map = generate(texts, cache_dir)
+    audio_map = generate(
+        texts,
+        cache_dir,
+        settings.voice.no,
+        settings.voice.rate_no,
+        settings.voice.volume_no,
+        settings.concurrency,
+    )
 
     # Уже наявні в медіатеці Anki файли повторно не заливаються
     existing = set(client.call('getMediaFilesNames', pattern=media_pattern()))
@@ -118,10 +135,17 @@ def card_label(card, text_fields):
 
 def main_cards(rest):
     preset = resolve_preset(rest)
-    client = connect(config.ANKICONNECT_URL)
+    settings = load_settings_or_exit()
+    client = connect(settings.anki_url)
 
     if preset.audio_fields and not ffmpeg_available():
         print('Не знайдено ffmpeg – він потрібен для обрізання тиші в згенерованому аудіо.')
+        sys.exit(1)
+
+    # Anki створює відсутню колоду мовчки, тож пресет із незаповненим
+    # deck_name інакше насипав би нот у новостворену "MyDeck::MySubdeck"
+    if preset.deck_name not in client.call('deckNames'):
+        print(f'Колоди "{preset.deck_name}" немає в Anki – треба або створити її, або виправити deck_name у presets/{preset.name}.toml.')
         sys.exit(1)
 
     model_fields = client.call('modelFieldNames', modelName=preset.model_name)
@@ -152,7 +176,7 @@ def main_cards(rest):
     if preset.audio_fields:
         cache_dir = os.path.join(os.path.dirname(input_path), 'audio_cache')
         os.makedirs(cache_dir, exist_ok=True)
-        audio_map = build_audio_map(valid, preset, cache_dir, client)
+        audio_map = build_audio_map(valid, preset, cache_dir, client, settings)
     else:
         audio_map = {}
 
@@ -177,26 +201,42 @@ def main_cards(rest):
     ok = 0
     duplicate = 0
     seen = set()
+    # Рядки збираються наперед, щоб вивід лишився в порядку карток,
+    # хоча самі ноти додаються одним запитом у кінці
+    lines = []
+    to_add = []
     for (i, card), note, check in zip(valid, notes, checks):
         label = card_label(card, text_fields)
         if not check['canAdd']:
             reason = check.get('error', 'нотатку не можна додати')
             if 'duplicate' in reason:
-                print(f'Картка {i}: вже існує – {label}')
+                lines.append((f'Картка {i}: вже існує – {label}', sys.stdout))
                 duplicate += 1
             else:
-                print(f'Картка {i}: пропущено – {reason}', file=sys.stderr)
+                lines.append((f'Картка {i}: пропущено – {reason}', sys.stderr))
                 failed += 1
             continue
         key = note['fields'].get(first_field, '')
         if key in seen:
-            print(f'Картка {i}: дубль усередині {config.INPUT_FILE} – {label}')
+            lines.append((f'Картка {i}: дубль усередині {config.INPUT_FILE} – {label}', sys.stdout))
             duplicate += 1
             continue
         seen.add(key)
-        client.call('addNote', note=note)
-        print(f'Картка {i}: OK – {label}')
-        ok += 1
+        lines.append(None)
+        to_add.append((len(lines) - 1, i, label, note))
+
+    if to_add:
+        added = client.call('addNotes', notes=[note for _, _, _, note in to_add])
+        for (slot, i, label, _), note_id in zip(to_add, added):
+            if note_id is None:
+                lines[slot] = (f'Картка {i}: пропущено – Anki не додав нотатку', sys.stderr)
+                failed += 1
+            else:
+                lines[slot] = (f'Картка {i}: OK – {label}', sys.stdout)
+                ok += 1
+
+    for message, stream in lines:
+        print(message, file=stream)
 
     print(f'\nСтворено: {ok} | Вже існували: {duplicate} | Пропущено: {failed}')
 
@@ -207,13 +247,8 @@ def main_audio(rest):
         sys.exit(1)
     query = rest[0]
 
-    if not os.path.exists(config.SETTINGS_FILE):
-        config.write_settings_template()
-        print(f'Створено {config.SETTINGS_FILE}. Налаштування потрібно перевірити і запустити скрипт повторно.')
-        sys.exit(0)
-
     # Налаштування читаються до підключення: адреса AnkiConnect береться з них
-    settings = config.load_settings()
+    settings = load_settings_or_exit()
     client = connect(settings.anki_url)
 
     out_path = asyncio.run(audio_build.run(query, settings, client))
