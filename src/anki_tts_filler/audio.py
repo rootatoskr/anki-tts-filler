@@ -1,11 +1,18 @@
+"""TTS для режиму cards: коротке аудіо в поле ноти Anki.
+
+Синтез, кеш і повтори спільні з режимом audio (tts_cache.py); тут лише своя
+схема імен файлів (як у медіатеці Anki) і обрізання тиші.
+"""
+
 import asyncio
 import hashlib
 import os
 import re
 import shutil
 import subprocess
-import edge_tts
-from .config import TTS_VOICE, TTS_RATE, MEDIA_PREFIX
+
+from .config import MEDIA_PREFIX
+from .tts_cache import TtsCache
 
 
 def strip_html(text):
@@ -22,12 +29,6 @@ def ffmpeg_available():
 
 def media_pattern():
     return f'{MEDIA_PREFIX}*.mp3'
-
-
-def _fname(text):
-    # Голос і темп входять у ключ кешу, щоб зміна TTS_VOICE/TTS_RATE не перевикористовувала старе аудіо
-    h = hashlib.md5(f'{text}|{TTS_VOICE}|{TTS_RATE}'.encode()).hexdigest()[:16]
-    return f'{MEDIA_PREFIX}{h}.mp3'
 
 
 def _trim_silence(path):
@@ -48,28 +49,29 @@ def _trim_silence(path):
     os.replace(tmp, path)
 
 
-async def _synthesize(text, path, semaphore):
-    async with semaphore:
-        for attempt in range(3):
-            try:
-                communicate = edge_tts.Communicate(text, TTS_VOICE, rate=TTS_RATE)
-                await communicate.save(path)
-                break
-            except Exception:
-                if attempt == 2:
-                    raise
-                await asyncio.sleep(1)
-    _trim_silence(path)
+class MediaCache(TtsCache):
+    """Кеш режиму cards: імена як у медіатеці Anki, з обрізанням тиші."""
+
+    def path_for(self, text, voice, rate, volume):
+        # Нейтральна гучність у ключ не входить: інакше всі вже залиті в Anki
+        # langdeck_* файли перегенерувалися б і продублювалися в медіатеці.
+        parts = [text, voice, rate] if volume == '+0%' else [text, voice, rate, volume]
+        digest = hashlib.md5('|'.join(parts).encode()).hexdigest()[:16]
+        return os.path.join(self.cache_dir, MEDIA_PREFIX + digest + '.mp3')
+
+    def postprocess(self, path):
+        _trim_silence(path)
 
 
-async def _run_all(tasks):
-    semaphore = asyncio.Semaphore(5)
-    await asyncio.gather(*[_synthesize(t, p, semaphore) for t, p in tasks])
+def generate(texts, cache_dir, voice, rate, volume, concurrency):
+    """Тексти -> {текст: шлях до mp3}. Наявні в кеші файли не переозвучуються."""
+    ordered = list(texts)
+    if not ordered:
+        return {}
 
+    cache = MediaCache(cache_dir, concurrency)
 
-def generate(texts, out_dir):
-    unique = {t: os.path.join(out_dir, _fname(t)) for t in texts}
-    to_gen = [(t, p) for t, p in unique.items() if not os.path.exists(p) or os.path.getsize(p) == 0]
-    if to_gen:
-        asyncio.run(_run_all(to_gen))
-    return unique
+    async def run_all():
+        return await asyncio.gather(*[cache.synthesize(t, voice, rate, volume) for t in ordered])
+
+    return dict(zip(ordered, asyncio.run(run_all())))
