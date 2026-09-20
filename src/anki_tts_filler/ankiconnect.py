@@ -32,6 +32,8 @@ class AnkiConnect:
             ) from exc
         if body.get('error'):
             raise AnkiConnectError('%s: %s' % (action, body['error']))
+        if 'result' not in body:
+            raise AnkiConnectError('%s: відповідь без поля result: %r' % (action, body))
         return body['result']
 
     def media_dir(self):
