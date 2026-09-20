@@ -41,7 +41,6 @@ class Utterance:
 @dataclass
 class Card:
     note_id: int
-    model: str
     sides: dict = field(default_factory=dict)
 
     def utterances(self):
@@ -94,7 +93,7 @@ def _value(note, name):
     return field_data['value'] if field_data else ''
 
 
-def build_card(note, use_anki_media, include_note, field_map):
+def build_card(note, use_anki_media, field_map):
     mapping = field_map.get(note['modelName'])
     if mapping is None:
         return None
@@ -115,12 +114,28 @@ def build_card(note, use_anki_media, include_note, field_map):
     if not sides.get('no') or not sides.get('uk'):
         return None
 
+    return Card(note_id=note['noteId'], sides=sides)
+
+
+def build_note_cards(note, use_anki_media, include_note, field_map):
+    """Нота -> основна картка плюс по картці на кожен приклад із поля ``note``.
+
+    Приклади саме окремими картками: всередині однієї картки спершу звучать
+    усі норвезькі репліки і лише потім усі українські, тож пара
+    "приклад - переклад" розсипалася б по різних кінцях картки.
+    """
+    card = build_card(note, use_anki_media, field_map)
+    if card is None:
+        return []
+
+    cards = [card]
     if include_note:
         for left, right in note_pairs(_value(note, 'note')):
-            sides['no'].append(Utterance(left, 'no'))
-            sides['uk'].append(Utterance(right, 'uk'))
-
-    return Card(note_id=note['noteId'], model=note['modelName'], sides=sides)
+            cards.append(Card(
+                note_id=note['noteId'],
+                sides={'no': [Utterance(left, 'no')], 'uk': [Utterance(right, 'uk')]},
+            ))
+    return cards
 
 
 def build_cards(notes, use_anki_media, include_note, field_map):
@@ -128,9 +143,9 @@ def build_cards(notes, use_anki_media, include_note, field_map):
     cards = []
     skipped = {}
     for note in notes:
-        card = build_card(note, use_anki_media, include_note, field_map)
-        if card is None:
+        from_note = build_note_cards(note, use_anki_media, include_note, field_map)
+        if not from_note:
             skipped[note['modelName']] = skipped.get(note['modelName'], 0) + 1
             continue
-        cards.append(card)
+        cards.extend(from_note)
     return cards, skipped
