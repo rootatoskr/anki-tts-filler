@@ -7,9 +7,6 @@ INPUT_FILE = 'cards.txt'
 PRESETS_DIR = 'presets'
 SETTINGS_FILE = 'settings.toml'
 
-TTS_VOICE = 'nb-NO-FinnNeural'
-TTS_RATE = '-40%'
-
 # Префікс імен згенерованих mp3 у медіатеці Anki
 MEDIA_PREFIX = 'langdeck_'
 
@@ -35,7 +32,9 @@ translation_field = "field_translation"
 audio_field_one = "field_one"
 '''
 
-SETTINGS_TEMPLATE = '''# Налаштування режиму audio. anki_url збігається з ANKICONNECT_URL у config.py.
+SETTINGS_TEMPLATE = '''# Налаштування обох режимів. Режим cards бере звідси anki_url, concurrency
+# і норвезький голос (voice.no, voice.rate_no, voice.volume_no); секції gap,
+# content і output стосуються лише режиму audio.
 anki_url = "http://127.0.0.1:8765"
 cache_dir = ".cache/tts"
 work_dir = ".cache/work"
@@ -50,7 +49,7 @@ volume_no = "+0%"
 volume_uk = "+0%"
 
 [gap]
-# Пауза після норвезької: час на згадати переклад.
+# Пауза після норвезької: час на згадати переклад. 0 - без паузи.
 after_no = 1.2
 # Пауза після української: коротка, далі йде повтор норвезької.
 after_uk = 0.4
@@ -65,6 +64,8 @@ use_anki_media = true
 # Поле note містить і пари "no - uk", і суцільні українські пояснення.
 # Пояснення пропускаються, але розбір лишається евристичним.
 include_note = false
+# Перемішувати порядок карток при кожному запуску.
+shuffle = true
 
 [output]
 dir = "out"
@@ -80,7 +81,7 @@ class SettingsError(Exception):
 class VoiceConfig:
     no: str = 'nb-NO-FinnNeural'
     uk: str = 'uk-UA-PolinaNeural'
-    rate_no: str = '+0%'
+    rate_no: str = '-40%'
     rate_uk: str = '+0%'
     volume_no: str = '+0%'
     volume_uk: str = '+0%'
@@ -100,6 +101,8 @@ class ContentConfig:
     repeat_no: int = 1
     use_anki_media: bool = True
     include_note: bool = False
+    # Перемішувати порядок карток при кожному запуску
+    shuffle: bool = True
 
 
 @dataclass
@@ -120,12 +123,31 @@ class Settings:
     output: OutputConfig = field(default_factory=OutputConfig)
 
 
+def _checked(value, expected, path):
+    """Значення з TOML проти типу поля дата-класу.
+
+    ``bool`` у Python - підклас ``int``, тому ``repeat_no = true`` без цієї
+    перевірки тихо перетворилося б на 1. Для float приймається і ціле з TOML
+    (``after_no = 2``), але одразу зводиться до float, щоб однакові паузи не
+    давали двох різних файлів тиші.
+    """
+    if expected is float:
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise SettingsError('%s: очікується число, а не %s' % (path, type(value).__name__))
+        return float(value)
+    if expected is int and isinstance(value, bool):
+        raise SettingsError('%s: очікується ціле число, а не bool' % path)
+    if not isinstance(value, expected):
+        raise SettingsError('%s: очікується %s, а не %s' % (path, expected.__name__, type(value).__name__))
+    return value
+
+
 def _apply_section(target, values, prefix):
-    known = {f.name for f in fields(target)}
+    known = {f.name: f.type for f in fields(target)}
     for key, value in values.items():
         if key not in known:
             raise SettingsError('невідомий ключ %s%s' % (prefix, key))
-        setattr(target, key, value)
+        setattr(target, key, _checked(value, known[key], prefix + key))
 
 
 def write_settings_template():
@@ -143,19 +165,26 @@ def load_settings(path=None):
         raw = tomllib.load(handle)
 
     settings = Settings()
+    known = {f.name: f.type for f in fields(settings)}
     for key, value in raw.items():
-        current = getattr(settings, key, None)
-        if is_dataclass(current):
-            _apply_section(current, value, '%s.' % key)
-        elif hasattr(settings, key):
-            setattr(settings, key, value)
-        else:
+        if key not in known:
             raise SettingsError('невідомий ключ %s' % key)
+        current = getattr(settings, key)
+        if is_dataclass(current):
+            if not isinstance(value, dict):
+                raise SettingsError('%s: очікується секція [%s]' % (key, key))
+            _apply_section(current, value, '%s.' % key)
+        else:
+            setattr(settings, key, _checked(value, known[key], key))
 
     if settings.content.repeat_no < 0:
         raise SettingsError('content.repeat_no має бути >= 0')
     if settings.concurrency < 1:
         raise SettingsError('concurrency має бути >= 1')
+    # Відʼємна пауза для ffmpeg - помилка, нульова означає "без паузи"
+    for name in ('after_no', 'after_uk', 'within_side', 'between_cards'):
+        if getattr(settings.gap, name) < 0:
+            raise SettingsError('gap.%s не може бути відʼємним' % name)
 
     return settings
 
