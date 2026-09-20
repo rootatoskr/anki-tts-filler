@@ -6,7 +6,9 @@ Anki), тут - довга доріжка для прослуховування 
 """
 
 import asyncio
+import hashlib
 import os
+import random
 import re
 import shutil
 import subprocess
@@ -35,9 +37,18 @@ def safe_name(query):
 
     Зворотні слеші - це екранування шаблонів Anki, а не частина назви, тому
     знімаються; провідний tag:/deck: теж, інакше імʼя виходить нечитабельним.
+
+    Небезпечні символи злипаються в "-", тож два різні запити ('deck:x -is:new'
+    і 'deck:x -is:due') дали б один файл. Коли заміни справді були, до імені
+    додається хвіст із хешу запиту; імена запитів без таких символів незмінні.
     """
-    text = QUERY_PREFIX_RE.sub('', query.replace('\\', '').strip())
-    return UNSAFE_RE.sub('-', text.replace('::', '__')).strip('-') or 'output'
+    text = QUERY_PREFIX_RE.sub('', query.replace('\\', '').strip()).replace('::', '__')
+    name = UNSAFE_RE.sub('-', text).strip('-')
+    if not name:
+        return 'output'
+    if name != text:
+        name += '-' + hashlib.sha1(query.encode()).hexdigest()[:6]
+    return name
 
 
 def probe_format(path):
@@ -116,7 +127,9 @@ def concat(paths, out_path, list_path, formats, bitrate):
         args += ['-c', 'copy']
         mode = 'copy'
     else:
-        codec, sample_rate, channels = sorted(distinct)[0]
+        # Найнижчий спільний формат саме за числами: sorted() порівнював би
+        # рядки, де "8000" виявляється більшим за "48000".
+        codec, sample_rate, channels = min(distinct, key=lambda fmt: (int(fmt[1]), int(fmt[2])))
         args += ['-c:a', 'libmp3lame', '-b:a', bitrate, '-ar', sample_rate, '-ac', channels]
         mode = 'encode'
     args.append(out_path)
@@ -166,6 +179,18 @@ async def resolve_paths(utterances, settings, cache, media_dir):
     return resolved, from_media
 
 
+def add_silence(sequence, silences, value):
+    """Пауза 0 означає "без паузи".
+
+    Файла тиші для неї нема: ffmpeg робить на ``-t 0`` mp3 без жодного фрейму,
+    а concat на такому файлі завершується кодом 0 і мовчки відкидає решту
+    доріжки - виходить обрізаний результат без жодної помилки.
+    """
+    path = silences.get(value)
+    if path is not None:
+        sequence.append(path)
+
+
 def assemble(card_list, resolved, gaps, silences):
     """Розкладає картки в плоский список доріжок із паузами між ними."""
     order = gaps['order']
@@ -177,12 +202,28 @@ def assemble(card_list, resolved, gaps, silences):
             for utterance_index, utterance in enumerate(utterances):
                 sequence.append(resolved[utterance])
                 if utterance_index < len(utterances) - 1:
-                    sequence.append(silences[gaps['within_side']])
+                    add_silence(sequence, silences, gaps['within_side'])
             if side_index < last_side:
-                sequence.append(silences[gaps['after_%s' % side]])
+                add_silence(sequence, silences, gaps['after_%s' % side])
         if card_index < len(card_list) - 1:
-            sequence.append(silences[gaps['between_cards']])
+            add_silence(sequence, silences, gaps['between_cards'])
     return sequence
+
+
+def shuffle_cards(card_list):
+    """Перемішує картки, не відриваючи приклади від слова, з якого вони взяті.
+
+    Картки однієї ноти йдуть поспіль (основна форма, далі приклади з поля
+    ``note``), тому перемішуються групи, а не окремі картки.
+    """
+    groups = []
+    for card in card_list:
+        if groups and groups[-1][0].note_id == card.note_id:
+            groups[-1].append(card)
+        else:
+            groups.append([card])
+    random.shuffle(groups)
+    return [card for group in groups for card in group]
 
 
 async def build(query, notes, settings, cache, media_dir, field_map):
@@ -195,6 +236,11 @@ async def build(query, notes, settings, cache, media_dir, field_map):
     base_stats = {'skipped': skipped}
     if not card_list:
         return None, base_stats
+
+    # Порядок карток фіксований порядком нот з Anki, через що послідовність
+    # запамʼятовується разом зі словами. Перемішування робить кожен запуск іншим.
+    if settings.content.shuffle:
+        card_list = shuffle_cards(card_list)
 
     all_utterances = [u for card in card_list for u in card.utterances()]
     resolved, from_media = await resolve_paths(all_utterances, settings, cache, media_dir)
@@ -217,7 +263,7 @@ async def build(query, notes, settings, cache, media_dir, field_map):
     silences = {}
     for key in ('after_no', 'after_uk', 'within_side', 'between_cards'):
         value = gaps[key]
-        if value not in silences:
+        if value > 0 and value not in silences:
             silences[value] = make_silence(settings.work_dir, value, base_format)
     formats.update({path: base_format for path in silences.values()})
 
