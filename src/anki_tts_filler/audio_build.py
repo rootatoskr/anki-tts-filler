@@ -294,7 +294,8 @@ async def run(query, settings, client):
     os.makedirs(settings.output.dir, exist_ok=True)
     os.makedirs(settings.work_dir, exist_ok=True)
     cache = TtsCache(settings.cache_dir, settings.concurrency)
-    field_map = note_cards.load_field_map(config.load_all_presets())
+    presets = config.load_all_presets()
+    field_map = note_cards.load_field_map(presets)
 
     note_ids = client.find_notes(query)
     print('%s -> нот: %d' % (query, len(note_ids)))
@@ -303,6 +304,12 @@ async def run(query, settings, client):
         return None
 
     notes = client.notes_info(note_ids)
+    config.verify_presets(
+        presets,
+        {note['modelName'] for note in notes},
+        lambda model: client.call('modelFieldNames', modelName=model),
+        'audio',
+    )
     out_path, stats = await build(query, notes, settings, cache, media_dir, field_map)
     for model, count in sorted(stats['skipped'].items()):
         print('пропущено %d нот типу %s' % (count, model))

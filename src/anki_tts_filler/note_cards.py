@@ -1,7 +1,7 @@
 """Перетворення нот Anki у картки з окремими норвезькою та українською сторонами.
 
-Схема полів береться з presets/*.toml (той самий файл, що й для режиму
-cards) - audio_fields дає норвезьку сторону, translation_field - українську.
+Схема полів береться з секції [audio] у presets/*.toml: no - норвезька
+сторона, uk - переклад.
 """
 
 import html
@@ -20,13 +20,17 @@ DASH = '–'
 def load_field_map(presets):
     """presets (config.Preset) -> {model_name: {'no': [...], 'uk': [...]}}.
 
-    Пресети без translation_field не дають уk-сторони - ноти такого типу
-    просто пропускаються в audio-режимі (як і невідомий modelName).
+    Поля беруться з секції [audio] пресету, а готові [sound:...] шукаються за
+    мапінгом із [cards]. Пресет без обох сторін audio-режиму не обслуговує -
+    ноти такого типу пропускаються (як і невідомий modelName).
     """
     field_map = {}
     for preset in presets:
-        no_side = [(text_field, audio_field) for audio_field, text_field in preset.audio_fields.items()]
-        uk_side = [(preset.translation_field, None)] if preset.translation_field else []
+        if not preset.audio_no or not preset.audio_uk:
+            continue
+        media = preset.media_fields()
+        no_side = [(text_field, media.get(text_field)) for text_field in preset.audio_no]
+        uk_side = [(text_field, None) for text_field in preset.audio_uk]
         field_map[preset.model_name] = {'no': no_side, 'uk': uk_side}
     return field_map
 

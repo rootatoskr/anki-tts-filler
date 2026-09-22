@@ -6,6 +6,7 @@ Anki через AnkiConnect: заповнення карток TTS-аудіо і
 Використання:
     uv run anki-tts-filler cards <preset>
     uv run anki-tts-filler audio '<query>'
+    uv run anki-tts-filler pdf '<query>'
 
 Anki має бути запущений з увімкненим аддоном AnkiConnect. Схема полів (яка
 колода/notetype, які поля норвезькі/переклад/аудіо) задається спільно для
@@ -19,6 +20,9 @@ settings.toml.
 напр. tag:no\\_familie або deck:language-no); з нот, що підійшли під запит,
 клеїться один mp3 (норвезька -> пауза -> переклад -> пауза -> норвезька ще
 раз). Налаштування голосу й пауз - у settings.toml.
+
+Режим pdf: та сама вибірка, що й audio, але на друк - кожне поле картки
+окремим рядком. Поки що виходить три варіанти верстки на вибір.
 """
 
 import asyncio
@@ -26,11 +30,12 @@ import sys
 import os
 import base64
 
-from . import config, audio_build
+from . import config, audio_build, pdf_build
 from .parser import split_cards, build_fields
 from .audio import generate, strip_html, sound_tag, ffmpeg_available, media_pattern
 from .ankiconnect import AnkiConnect, AnkiConnectError
 from .audio_build import AudioError
+from .pdf_build import PdfError
 from .config import SettingsError
 from .tts_cache import TtsError
 
@@ -39,6 +44,7 @@ def usage():
     print('Використання:')
     print("  anki-tts-filler cards <preset>")
     print("  anki-tts-filler audio '<query>'")
+    print("  anki-tts-filler pdf '<query>'")
 
 
 def connect(url):
@@ -103,7 +109,7 @@ def load_settings_or_exit():
 def build_audio_map(valid, preset, cache_dir, client, settings):
     texts = set()
     for _, card in valid:
-        for src in set(preset.audio_fields.values()):
+        for src in set(preset.cards.values()):
             text = strip_html(card.get(src, ''))
             if text:
                 texts.add(text)
@@ -138,7 +144,7 @@ def main_cards(rest):
     settings = load_settings_or_exit()
     client = connect(settings.anki_url)
 
-    if preset.audio_fields and not ffmpeg_available():
+    if preset.cards and not ffmpeg_available():
         print('Не знайдено ffmpeg – він потрібен для обрізання тиші в згенерованому аудіо.')
         sys.exit(1)
 
@@ -149,8 +155,14 @@ def main_cards(rest):
         sys.exit(1)
 
     model_fields = client.call('modelFieldNames', modelName=preset.model_name)
+    # Одруківка в назві поля інакше тихо лишила б поле порожнім у всіх нових нотах
+    missing = config.missing_fields(preset, model_fields, 'cards')
+    if missing:
+        print(f'presets/{preset.name}.toml: нотетайп {preset.model_name} не має полів: {", ".join(missing)}')
+        sys.exit(1)
+
     # Поля, що вводяться вручну в cards.txt – усі поля нотетайпу, крім згенерованих аудіополів
-    text_fields = [f for f in model_fields if f not in preset.audio_fields]
+    text_fields = [f for f in model_fields if f not in preset.cards]
 
     input_path = os.path.abspath(config.INPUT_FILE)
     text = read_cards(input_path)
@@ -173,7 +185,7 @@ def main_cards(rest):
         print('Жодної валідної картки.')
         sys.exit(1)
 
-    if preset.audio_fields:
+    if preset.cards:
         cache_dir = os.path.join(os.path.dirname(input_path), 'audio_cache')
         os.makedirs(cache_dir, exist_ok=True)
         audio_map = build_audio_map(valid, preset, cache_dir, client, settings)
@@ -183,7 +195,7 @@ def main_cards(rest):
     notes = []
     for _, card in valid:
         audio_tags = {}
-        for audio_field, src in preset.audio_fields.items():
+        for audio_field, src in preset.cards.items():
             src_text = strip_html(card.get(src, ''))
             audio_tags[audio_field] = sound_tag(audio_map[src_text]) if src_text else ''
         notes.append({
@@ -256,8 +268,20 @@ def main_audio(rest):
         sys.exit(1)
 
 
+def main_pdf(rest):
+    if len(rest) < 1:
+        print("Запит не вказано. Використання: anki-tts-filler pdf '<query>'")
+        sys.exit(1)
+
+    settings = load_settings_or_exit()
+    client = connect(settings.anki_url)
+
+    if not pdf_build.run(rest[0], settings, client):
+        sys.exit(1)
+
+
 def main():
-    if len(sys.argv) < 2 or sys.argv[1] not in ('cards', 'audio'):
+    if len(sys.argv) < 2 or sys.argv[1] not in ('cards', 'audio', 'pdf'):
         usage()
         return 1
 
@@ -268,9 +292,11 @@ def main():
     try:
         if mode == 'cards':
             main_cards(rest)
-        else:
+        elif mode == 'audio':
             main_audio(rest)
-    except (SettingsError, AnkiConnectError, AudioError, TtsError) as exc:
+        else:
+            main_pdf(rest)
+    except (SettingsError, AnkiConnectError, AudioError, PdfError, TtsError) as exc:
         print('помилка: %s' % exc, file=sys.stderr)
         return 1
     except KeyboardInterrupt:

@@ -21,15 +21,23 @@ PRESET_TEMPLATE = '''# Мають точно збігатися з назвам�
 deck_name = "MyDeck::MySubdeck"
 model_name = "MyNoteType"
 
-# Поле перекладу - потрібне лише режиму audio (озвучення норвезька -> переклад -> норвезька).
-# Режим cards його ігнорує.
-translation_field = "field_translation"
+# Поля кожен режим бере зі своєї секції. Секції немає - режим цей тип ноти
+# не обслуговує. Назви полів звіряються з нотетайпом у Anki при запуску.
 
-# Аудіо-поле: з якого текстового поля згенерувати аудіо. Решта полів нотетайпу
-# вводяться вручну в cards.txt, у будь-якому порядку; відсутнє поле лишається порожнім.
-# Той самий список використовує й режим audio для норвезької сторони.
-[audio_fields]
+# Режим cards: аудіополе = текстове поле, з якого згенерувати аудіо. Решта
+# полів нотетайпу вводяться вручну в cards.txt, у будь-якому порядку.
+[cards]
 audio_field_one = "field_one"
+
+# Режим audio: no - норвезька сторона, uk - переклад. Порядок = черга
+# озвучення. Готові [sound:...] беруться за мапінгом із секції [cards].
+[audio]
+no = ["field_one"]
+uk = ["field_translation"]
+
+# Режим pdf: рядки картки в цьому ж порядку. Порожнє поле рядка не дає.
+[pdf]
+fields = ["field_one", "field_translation", "note"]
 '''
 
 SETTINGS_TEMPLATE = '''# Налаштування обох режимів. Режим cards бере звідси anki_url, concurrency
@@ -197,13 +205,38 @@ _DECK_LINE_RE = re.compile(r'(?m)^deck\s*:\s*(.+)$')
 _DECK_PREFIX_RE = re.compile(r'^deck\s*:\s*')
 
 
+class PresetError(SettingsError):
+    pass
+
+
 class Preset:
-    def __init__(self, name, deck_name, model_name, audio_fields, translation_field=''):
+    def __init__(self, name, deck_name, model_name, cards, audio_no, audio_uk, pdf_fields):
         self.name = name
         self.deck_name = deck_name
         self.model_name = model_name
-        self.audio_fields = audio_fields
-        self.translation_field = translation_field
+        # cards: {аудіополе: текстове поле}; решта - списки полів у порядку виводу
+        self.cards = cards
+        self.audio_no = audio_no
+        self.audio_uk = audio_uk
+        self.pdf_fields = pdf_fields
+
+    def media_fields(self):
+        """Текстове поле -> аудіополе, щоб режим audio знаходив готові [sound:...]."""
+        return {text_field: audio_field for audio_field, text_field in self.cards.items()}
+
+    def mode_fields(self, mode):
+        """Поля, потрібні конкретному режиму - тільки їх і має сенс звіряти.
+
+        Режим audio додає ще й аудіополя з [cards]: без них готові [sound:...]
+        не знайдуться і все тихо озвучиться заново через TTS.
+        """
+        if mode == 'cards':
+            return set(self.cards) | set(self.cards.values())
+        if mode == 'pdf':
+            return set(self.pdf_fields)
+        media = self.media_fields()
+        used = set(self.audio_no) | set(self.audio_uk)
+        return used | {media[name] for name in self.audio_no if name in media}
 
 
 def presets_path():
@@ -232,6 +265,77 @@ def _normalize_name(value):
     return _DECK_PREFIX_RE.sub('', value.strip()).replace('\\_', '_')
 
 
+def _string_list(raw, path, preset_name):
+    if not isinstance(raw, list) or not all(isinstance(item, str) for item in raw):
+        raise PresetError('%s: %s має бути списком назв полів' % (preset_name, path))
+    return raw
+
+
+def _section(schema, name, preset_name):
+    value = schema.get(name)
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise PresetError('%s: [%s] має бути секцією' % (preset_name, name))
+    return value
+
+
+def _parse_sections(schema, preset_name):
+    """Три секції пресету -> поля для cards, audio і pdf.
+
+    Порожня чи відсутня секція означає, що режим цей тип ноти не обслуговує.
+    Старі ключі схеми відхиляються явно, а не ігноруються мовчки.
+    """
+    for old in ('audio_fields', 'translation_field'):
+        if old in schema:
+            raise PresetError(
+                '%s: ключ %s зі старої схеми; поля тепер задаються секціями [cards], [audio], [pdf]'
+                % (preset_name, old)
+            )
+
+    cards = _section(schema, 'cards', preset_name)
+    for audio_field, text_field in cards.items():
+        if not isinstance(text_field, str):
+            raise PresetError('%s: [cards] %s має бути назвою текстового поля' % (preset_name, audio_field))
+
+    audio = _section(schema, 'audio', preset_name)
+    unknown = sorted(set(audio) - {'no', 'uk'})
+    if unknown:
+        raise PresetError('%s: у [audio] невідомі ключі: %s' % (preset_name, ', '.join(unknown)))
+    audio_no = _string_list(audio.get('no', []), 'audio.no', preset_name)
+    audio_uk = _string_list(audio.get('uk', []), 'audio.uk', preset_name)
+
+    pdf = _section(schema, 'pdf', preset_name)
+    unknown = sorted(set(pdf) - {'fields'})
+    if unknown:
+        raise PresetError('%s: у [pdf] невідомі ключі: %s' % (preset_name, ', '.join(unknown)))
+    pdf_fields = _string_list(pdf.get('fields', []), 'pdf.fields', preset_name)
+
+    return cards, audio_no, audio_uk, pdf_fields
+
+
+def missing_fields(preset, model_fields, mode):
+    """Назви полів режиму, яких немає в нотетайпі."""
+    known = set(model_fields)
+    return sorted(name for name in preset.mode_fields(mode) if name not in known)
+
+
+def verify_presets(presets, models, fetch_fields, mode):
+    """Звіряє пресети потрібних типів нот із нотетайпами в Anki.
+
+    fetch_fields - функція model_name -> список полів; так config лишається
+    без залежності від AnkiConnect.
+    """
+    for preset in presets:
+        if preset.model_name not in models or not preset.mode_fields(mode):
+            continue
+        missing = missing_fields(preset, fetch_fields(preset.model_name), mode)
+        if missing:
+            raise PresetError('presets/%s.toml: нотетайп %s не має полів: %s' % (
+                preset.name, preset.model_name, ', '.join(missing),
+            ))
+
+
 def load_preset(name):
     with open(os.path.join(presets_path(), name + '.toml'), encoding='utf-8') as f:
         raw = f.read()
@@ -251,8 +355,7 @@ def load_preset(name):
         name,
         _normalize_name(deck_name),
         _normalize_name(schema['model_name']),
-        schema.get('audio_fields', {}),
-        schema.get('translation_field', ''),
+        *_parse_sections(schema, 'presets/%s.toml' % name),
     )
 
 

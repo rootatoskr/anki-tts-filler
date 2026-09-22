@@ -1,9 +1,15 @@
 deck_name = "language-no::no-verb"
 model_name = "type-language-no-verb"
-translation_field = "infinitiv_uk"
 
-[audio_fields]
+[cards]
 audio_infinitiv = "infinitiv"
 audio_presens = "presens"
 audio_preteritum = "preteritum"
 audio_presens_perfektum = "presens_perfektum"
+
+[audio]
+no = ["infinitiv", "presens", "preteritum", "presens_perfektum"]
+uk = ["infinitiv_uk"]
+
+[pdf]
+fields = ["infinitiv", "presens", "preteritum", "presens_perfektum", "infinitiv_uk", "note"]

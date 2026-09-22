@@ -1,9 +1,15 @@
 deck_name = "language-no::no-substantiv"
 model_name = "type-language-no-substantiv"
-translation_field = "substantiv_uk"
 
-[audio_fields]
+[cards]
 audio_substantiv = "substantiv"
 audio_bestemt_ental = "bestemt_ental"
 audio_ubestemt_flertall = "ubestemt_flertall"
 audio_bestemt_flertall = "bestemt_flertall"
+
+[audio]
+no = ["substantiv", "bestemt_ental", "ubestemt_flertall", "bestemt_flertall"]
+uk = ["substantiv_uk"]
+
+[pdf]
+fields = ["substantiv", "bestemt_ental", "ubestemt_flertall", "bestemt_flertall", "substantiv_uk", "note"]

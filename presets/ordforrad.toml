@@ -1,6 +1,12 @@
 deck_name = "language-no::no-ordforråd"
 model_name = "type-language-no-basic"
-translation_field = "production"
 
-[audio_fields]
+[cards]
 audio = "recognition"
+
+[audio]
+no = ["recognition"]
+uk = ["production"]
+
+[pdf]
+fields = ["recognition", "production", "note"]
