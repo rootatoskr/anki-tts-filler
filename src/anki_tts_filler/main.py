@@ -23,6 +23,10 @@ settings.toml.
 
 Режим pdf: та сама вибірка, що й audio, але на друк - кожне поле картки
 окремим рядком. Поки що виходить три варіанти верстки на вибір.
+
+Режим resync: query - той самий Anki-запит, що й у audio/pdf. Аудіополя з
+[cards] пресету переозвучуються за поточним текстом відповідних полів уже
+існуючих нот - для картки, яку відредагували вручну після створення.
 """
 
 import asyncio
@@ -30,21 +34,25 @@ import sys
 import os
 import base64
 
-from . import config, audio_build, pdf_build
+from . import config, audio_build, draft, pdf_build, resync
 from .parser import split_cards, build_fields
 from .audio import generate, strip_html, sound_tag, ffmpeg_available, media_pattern
 from .ankiconnect import AnkiConnect, AnkiConnectError
 from .audio_build import AudioError
 from .pdf_build import PdfError
+from .resync import ResyncError
 from .config import SettingsError
 from .tts_cache import TtsError
 
 
 def usage():
     print('Використання:')
-    print("  anki-tts-filler cards <preset>")
-    print("  anki-tts-filler audio '<query>'")
-    print("  anki-tts-filler pdf '<query>'")
+    print("  anki cards <preset>")
+    print("  anki audio '<query>'")
+    print("  anki pdf '<query>'")
+    print("  anki resync '<query>'")
+    print("  anki presets [preset]")
+    print("  anki draft [--append] [--print] [--stdin]")
 
 
 def connect(url):
@@ -186,7 +194,7 @@ def main_cards(rest):
         sys.exit(1)
 
     if preset.cards:
-        cache_dir = os.path.join(os.path.dirname(input_path), 'audio_cache')
+        cache_dir = os.path.join(os.path.dirname(input_path), config.AUDIO_CACHE_DIR)
         os.makedirs(cache_dir, exist_ok=True)
         audio_map = build_audio_map(valid, preset, cache_dir, client, settings)
     else:
@@ -268,6 +276,168 @@ def main_audio(rest):
         sys.exit(1)
 
 
+DRAFT_FLAGS = ('--print', '--append', '--stdin')
+DRAFT_OPTIONS = ()
+
+
+def parse_draft_args(rest):
+    name = None
+    flags = set()
+    options = {}
+    index = 0
+    while index < len(rest):
+        item = rest[index]
+        if item in DRAFT_FLAGS:
+            flags.add(item)
+        elif item in DRAFT_OPTIONS:
+            index += 1
+            if index >= len(rest):
+                print(f'Після {item} потрібне значення.')
+                sys.exit(1)
+            options[item] = rest[index]
+        elif item.startswith('-'):
+            print(f'Невідомий прапорець {item}.')
+            sys.exit(1)
+        elif name is None:
+            name = item
+        else:
+            print(f'Зайвий аргумент {item}.')
+            sys.exit(1)
+        index += 1
+    return name, flags, options
+
+
+def read_draft(use_stdin):
+    """Сирий список: типово з draft.txt, при --stdin - із потоку."""
+    if use_stdin:
+        raw = sys.stdin.read()
+        if not raw.strip():
+            print('Порожній ввід.')
+            sys.exit(1)
+        return raw
+
+    path = os.path.abspath(config.DRAFT_FILE)
+    if not os.path.isfile(path):
+        open(path, 'w').close()
+        print(f'Створено {config.DRAFT_FILE}. Список потрібно вставити і запустити скрипт повторно.')
+        sys.exit(0)
+
+    with open(path, encoding='utf-8') as handle:
+        raw = handle.read()
+    if not raw.strip():
+        print(f'{config.DRAFT_FILE} порожній. Список потрібно вставити і запустити скрипт повторно.')
+        sys.exit(0)
+    return raw
+
+
+def write_draft(path, body, append):
+    existing = ''
+    if os.path.exists(path):
+        with open(path, encoding='utf-8') as handle:
+            existing = handle.read()
+    with open(path, 'a' if append else 'w', encoding='utf-8') as handle:
+        if append and existing and not existing.endswith('\n\n'):
+            handle.write('\n' if existing.endswith('\n') else '\n\n')
+        handle.write(body)
+
+
+def main_draft(rest):
+    name, flags, options = parse_draft_args(rest)
+    # Режим прив'язаний до ordforrad: назви полів у draft.py - конкретні поля
+    # цього нотетайпу, для іншого вони були б просто неправдою
+    if name is not None and name != draft.PRESET_NAME:
+        print(f'draft працює тільки з пресетом {draft.PRESET_NAME}, а не "{name}".')
+        sys.exit(1)
+    if draft.PRESET_NAME not in config.list_presets():
+        print(f'Пресет {draft.PRESET_NAME} не знайдено в presets/.')
+        sys.exit(1)
+
+    preset = config.load_preset(draft.PRESET_NAME)
+    settings = load_settings_or_exit()
+    client = connect(settings.anki_url)
+
+    model_fields = client.call('modelFieldNames', modelName=preset.model_name)
+    unknown = [name for name in draft.FIELDS if name not in model_fields]
+    if unknown:
+        print(f'Нотетайп {preset.model_name} не має полів: {", ".join(unknown)}')
+        sys.exit(1)
+
+    raw = read_draft('--stdin' in flags)
+    cards, problems = draft.generate(raw)
+
+    lines = len([line for line in raw.splitlines() if line.strip()])
+    print(f'карток: {len(cards)} | рядків на вході: {lines}', file=sys.stderr)
+    for problem in problems:
+        print(f'увага: {problem}', file=sys.stderr)
+    if problems:
+        print('деякі рядки не розібрались – нічого не записано', file=sys.stderr)
+        sys.exit(1)
+
+    body = draft.format_cards(cards)
+    if '--print' in flags:
+        print(body, end='')
+        return
+    path = os.path.abspath(config.INPUT_FILE)
+    replaced = '--append' not in flags and os.path.exists(path) and os.path.getsize(path) > 0
+    write_draft(path, body, '--append' in flags)
+    print(
+        f'{"перезаписано" if replaced else "записано"} в {config.INPUT_FILE}',
+        file=sys.stderr,
+    )
+
+
+def main_presets(rest):
+    """Друкує, яку роль кожне поле нотетайпу має в пресеті.
+
+    Показує і те, чого не ловить звіряння при запуску: поле нотетайпу, яке в
+    пресеті не згадане ніде, тобто ніколи не прозвучить і не надрукується.
+    """
+    names = config.list_presets()
+    if rest:
+        if rest[0] not in names:
+            print(f'Пресет "{rest[0]}" не знайдено. Доступні: {", ".join(names)}')
+            sys.exit(1)
+        names = [rest[0]]
+
+    settings = load_settings_or_exit()
+    client = connect(settings.anki_url)
+
+    for name in names:
+        preset = config.load_preset(name)
+        print(f'\n{name} ({preset.model_name}, audio: {preset.audio_order}, pdf: {preset.pdf_order})')
+        try:
+            model_fields = client.call('modelFieldNames', modelName=preset.model_name)
+        except AnkiConnectError as exc:
+            print(f'  нотетайпу немає в Anki: {exc}')
+            continue
+
+        roles = config.field_roles(preset)
+        unused = []
+        for field_name in model_fields:
+            used = roles.pop(field_name, [])
+            if used:
+                print(f'  {field_name} – {", ".join(used)}')
+            else:
+                unused.append(field_name)
+        if unused:
+            print(f'  ніде не згадані: {", ".join(unused)}')
+        if roles:
+            print(f'  у пресеті є, а в нотетайпі немає: {", ".join(sorted(roles))}')
+
+
+def main_resync(rest):
+    if len(rest) < 1:
+        print("Запит не вказано. Використання: anki-tts-filler resync '<query>'")
+        sys.exit(1)
+    query = rest[0]
+
+    settings = load_settings_or_exit()
+    client = connect(settings.anki_url)
+
+    if not resync.run(query, settings, client):
+        sys.exit(1)
+
+
 def main_pdf(rest):
     if len(rest) < 1:
         print("Запит не вказано. Використання: anki-tts-filler pdf '<query>'")
@@ -281,7 +451,7 @@ def main_pdf(rest):
 
 
 def main():
-    if len(sys.argv) < 2 or sys.argv[1] not in ('cards', 'audio', 'pdf'):
+    if len(sys.argv) < 2 or sys.argv[1] not in ('cards', 'audio', 'pdf', 'resync', 'presets', 'draft'):
         usage()
         return 1
 
@@ -294,9 +464,15 @@ def main():
             main_cards(rest)
         elif mode == 'audio':
             main_audio(rest)
-        else:
+        elif mode == 'pdf':
             main_pdf(rest)
-    except (SettingsError, AnkiConnectError, AudioError, PdfError, TtsError) as exc:
+        elif mode == 'resync':
+            main_resync(rest)
+        elif mode == 'presets':
+            main_presets(rest)
+        else:
+            main_draft(rest)
+    except (SettingsError, AnkiConnectError, AudioError, PdfError, ResyncError, TtsError) as exc:
         print('помилка: %s' % exc, file=sys.stderr)
         return 1
     except KeyboardInterrupt:
