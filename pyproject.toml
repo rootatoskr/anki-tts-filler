@@ -9,6 +9,7 @@ dependencies = [
 ]
 
 [project.scripts]
+anki = "anki_tts_filler.main:main"
 anki-tts-filler = "anki_tts_filler.main:main"
 
 [build-system]
