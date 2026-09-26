@@ -8,8 +8,12 @@ model_name = "type-language-no-cloze"
 audio_1 = "example_1"
 
 [audio]
+# "linear" - як у Anki, "random" - для фонового слухання, "sorted" - за абеткою
+order = "linear"
 no = ["example_1"]
 uk = ["translation_1"]
 
 [pdf]
+# шпаргалку зручніше читати за абеткою першого рядка
+order = "sorted"
 fields = ["title", "example_1", "translation_1", "note"]

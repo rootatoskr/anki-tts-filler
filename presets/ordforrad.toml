@@ -5,8 +5,13 @@ model_name = "type-language-no-basic"
 audio = "recognition"
 
 [audio]
+# "linear" - як у Anki, "random" - для фонового слухання, "sorted" - за абеткою
+order = "linear"
 no = ["recognition"]
 uk = ["production"]
 
 [pdf]
+# фрази лишаються в порядку з Anki, тобто в порядку уроку: абетка збирала б
+# їх у грона за займенником ("Jeg ...", "Han ..."), а не за змістом
+order = "linear"
 fields = ["recognition", "production", "note"]

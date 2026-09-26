@@ -8,8 +8,12 @@ audio_ubestemt_flertall = "ubestemt_flertall"
 audio_bestemt_flertall = "bestemt_flertall"
 
 [audio]
+# "linear" - як у Anki, "random" - для фонового слухання, "sorted" - за абеткою
+order = "linear"
 no = ["substantiv", "bestemt_ental", "ubestemt_flertall", "bestemt_flertall"]
 uk = ["substantiv_uk"]
 
 [pdf]
+# шпаргалку зручніше читати за абеткою першого рядка
+order = "sorted"
 fields = ["substantiv", "bestemt_ental", "ubestemt_flertall", "bestemt_flertall", "substantiv_uk", "note"]

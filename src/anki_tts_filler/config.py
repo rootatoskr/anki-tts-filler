@@ -4,13 +4,23 @@ import tomllib
 from dataclasses import dataclass, field, fields, is_dataclass
 
 INPUT_FILE = 'cards.txt'
+# Сирий список для режиму draft: звідти читаємо, у INPUT_FILE пишемо
+DRAFT_FILE = 'draft.txt'
 PRESETS_DIR = 'presets'
 SETTINGS_FILE = 'settings.toml'
 
 # Префікс імен згенерованих mp3 у медіатеці Anki
 MEDIA_PREFIX = 'langdeck_'
+# Кеш режимів cards і resync: та сама схема імен, той самий MEDIA_PREFIX
+AUDIO_CACHE_DIR = 'audio_cache'
 
 ANKICONNECT_URL = 'http://127.0.0.1:8765'
+
+# Порядок карток: як у Anki, перемішаний або за абеткою
+ORDER_LINEAR = 'linear'
+ORDER_RANDOM = 'random'
+ORDER_SORTED = 'sorted'
+ORDERS = (ORDER_LINEAR, ORDER_RANDOM, ORDER_SORTED)
 
 ERROR_LINES = {
     'Невідомий вхід.',
@@ -29,14 +39,22 @@ model_name = "MyNoteType"
 [cards]
 audio_field_one = "field_one"
 
-# Режим audio: no - норвезька сторона, uk - переклад. Порядок = черга
-# озвучення. Готові [sound:...] беруться за мапінгом із секції [cards].
+# Режим audio: no - норвезька сторона, uk - переклад. Порядок полів у списку
+# = черга озвучення. Готові [sound:...] беруться за мапінгом із секції [cards].
+# examples - поле з прикладами "норвезька - переклад" через en dash; кожна
+# пара стає окремою карткою. Без ключа приклади не озвучуються.
+# order - порядок карток: "linear" (як у Anki), "random" (для фонового
+# слухання, щоб не вчилася послідовність) або "sorted" (за абеткою).
 [audio]
+order = "linear"
 no = ["field_one"]
 uk = ["field_translation"]
+examples = "note"
 
 # Режим pdf: рядки картки в цьому ж порядку. Порожнє поле рядка не дає.
+# order - для шпаргалки зазвичай "sorted": картки за абеткою першого рядка.
 [pdf]
+order = "sorted"
 fields = ["field_one", "field_translation", "note"]
 '''
 
@@ -69,11 +87,6 @@ between_cards = 1.5
 # Скільки разів норвезька повторюється після перекладу: no -> uk -> no (repeat_no разів)
 repeat_no = 1
 use_anki_media = true
-# Поле note містить і пари "no - uk", і суцільні українські пояснення.
-# Пояснення пропускаються, але розбір лишається евристичним.
-include_note = false
-# Перемішувати порядок карток при кожному запуску.
-shuffle = true
 
 [output]
 dir = "out"
@@ -108,9 +121,6 @@ class ContentConfig:
     # Скільки разів норвезька повторюється після перекладу: no -> uk -> no*repeat_no
     repeat_no: int = 1
     use_anki_media: bool = True
-    include_note: bool = False
-    # Перемішувати порядок карток при кожному запуску
-    shuffle: bool = True
 
 
 @dataclass
@@ -210,7 +220,7 @@ class PresetError(SettingsError):
 
 
 class Preset:
-    def __init__(self, name, deck_name, model_name, cards, audio_no, audio_uk, pdf_fields):
+    def __init__(self, name, deck_name, model_name, cards, audio_no, audio_uk, audio_examples, audio_order, pdf_fields, pdf_order):
         self.name = name
         self.deck_name = deck_name
         self.model_name = model_name
@@ -218,7 +228,16 @@ class Preset:
         self.cards = cards
         self.audio_no = audio_no
         self.audio_uk = audio_uk
+        # поле з прикладами "норвезька - переклад"; порожнє - прикладів нема
+        self.audio_examples = audio_examples
         self.pdf_fields = pdf_fields
+        # порядок карток окремо для кожного режиму: слухання й друк
+        # потребують різного - рандом проти стабільної абетки
+        self.audio_order = audio_order
+        self.pdf_order = pdf_order
+
+    def order_for(self, mode):
+        return self.audio_order if mode == 'audio' else self.pdf_order
 
     def media_fields(self):
         """Текстове поле -> аудіополе, щоб режим audio знаходив готові [sound:...]."""
@@ -236,6 +255,8 @@ class Preset:
             return set(self.pdf_fields)
         media = self.media_fields()
         used = set(self.audio_no) | set(self.audio_uk)
+        if self.audio_examples:
+            used.add(self.audio_examples)
         return used | {media[name] for name in self.audio_no if name in media}
 
 
@@ -280,8 +301,18 @@ def _section(schema, name, preset_name):
     return value
 
 
+def _parse_order(section, path, preset_name):
+    # Без ключа - лінійно: порядок з Anki передбачуваний, решту вмикають свідомо
+    order = section.get('order', ORDER_LINEAR)
+    if order not in ORDERS:
+        raise PresetError('%s: %s має бути одним із %s, а не %r' % (
+            preset_name, path, ', '.join('"%s"' % value for value in ORDERS), order,
+        ))
+    return order
+
+
 def _parse_sections(schema, preset_name):
-    """Три секції пресету -> поля для cards, audio і pdf.
+    """Пресет -> порядок карток і поля для cards, audio і pdf.
 
     Порожня чи відсутня секція означає, що режим цей тип ноти не обслуговує.
     Старі ключі схеми відхиляються явно, а не ігноруються мовчки.
@@ -293,25 +324,68 @@ def _parse_sections(schema, preset_name):
                 % (preset_name, old)
             )
 
+    if 'order' in schema:
+        raise PresetError(
+            '%s: order тепер задається окремо для кожного режиму - у секціях [audio] і [pdf]'
+            % preset_name
+        )
+
     cards = _section(schema, 'cards', preset_name)
     for audio_field, text_field in cards.items():
         if not isinstance(text_field, str):
             raise PresetError('%s: [cards] %s має бути назвою текстового поля' % (preset_name, audio_field))
 
     audio = _section(schema, 'audio', preset_name)
-    unknown = sorted(set(audio) - {'no', 'uk'})
+    unknown = sorted(set(audio) - {'no', 'uk', 'examples', 'order'})
     if unknown:
         raise PresetError('%s: у [audio] невідомі ключі: %s' % (preset_name, ', '.join(unknown)))
     audio_no = _string_list(audio.get('no', []), 'audio.no', preset_name)
     audio_uk = _string_list(audio.get('uk', []), 'audio.uk', preset_name)
+    audio_examples = audio.get('examples', '')
+    if not isinstance(audio_examples, str):
+        raise PresetError('%s: audio.examples має бути назвою поля' % preset_name)
 
     pdf = _section(schema, 'pdf', preset_name)
-    unknown = sorted(set(pdf) - {'fields'})
+    unknown = sorted(set(pdf) - {'fields', 'order'})
     if unknown:
         raise PresetError('%s: у [pdf] невідомі ключі: %s' % (preset_name, ', '.join(unknown)))
     pdf_fields = _string_list(pdf.get('fields', []), 'pdf.fields', preset_name)
 
-    return cards, audio_no, audio_uk, pdf_fields
+    return (
+        cards,
+        audio_no,
+        audio_uk,
+        audio_examples,
+        _parse_order(audio, 'audio.order', preset_name),
+        pdf_fields,
+        _parse_order(pdf, 'pdf.order', preset_name),
+    )
+
+
+def field_roles(preset):
+    """Поле нотетайпу -> ролі, які йому дає пресет.
+
+    Звіряння з Anki ловить назву, якої нема в нотетайпі, але не зворотне:
+    поле, яке існує, а в пресеті не згадане, просто ніде не зʼявиться.
+    """
+    roles = {}
+    for audio_field, text_field in preset.cards.items():
+        roles.setdefault(text_field, []).append('cards')
+        roles.setdefault(audio_field, []).append('cards:аудіо')
+    for text_field in preset.audio_no:
+        roles.setdefault(text_field, []).append('audio:no')
+    for text_field in preset.audio_uk:
+        roles.setdefault(text_field, []).append('audio:uk')
+    if preset.audio_examples:
+        roles.setdefault(preset.audio_examples, []).append('audio:examples')
+    for text_field in preset.pdf_fields:
+        roles.setdefault(text_field, []).append('pdf')
+    return roles
+
+
+def orders(presets, mode):
+    """Тип ноти -> порядок, заданий пресетом для цього режиму."""
+    return {preset.model_name: preset.order_for(mode) for preset in presets}
 
 
 def missing_fields(preset, model_fields, mode):

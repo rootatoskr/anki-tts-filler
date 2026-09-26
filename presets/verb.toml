@@ -8,8 +8,12 @@ audio_preteritum = "preteritum"
 audio_presens_perfektum = "presens_perfektum"
 
 [audio]
+# "linear" - як у Anki, "random" - для фонового слухання, "sorted" - за абеткою
+order = "linear"
 no = ["infinitiv", "presens", "preteritum", "presens_perfektum"]
 uk = ["infinitiv_uk"]
 
 [pdf]
+# шпаргалку зручніше читати за абеткою першого рядка
+order = "sorted"
 fields = ["infinitiv", "presens", "preteritum", "presens_perfektum", "infinitiv_uk", "note"]

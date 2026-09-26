@@ -8,7 +8,6 @@ Anki), тут - довга доріжка для прослуховування 
 import asyncio
 import hashlib
 import os
-import random
 import re
 import shutil
 import subprocess
@@ -210,11 +209,12 @@ def assemble(card_list, resolved, gaps, silences):
     return sequence
 
 
-def shuffle_cards(card_list):
-    """Перемішує картки, не відриваючи приклади від слова, з якого вони взяті.
+def order_cards(card_list, orders):
+    """Розкладає картки за порядком із пресетів, не розриваючи ноту.
 
-    Картки однієї ноти йдуть поспіль (основна форма, далі приклади з поля
-    ``note``), тому перемішуються групи, а не окремі картки.
+    Картки однієї ноти йдуть поспіль (основна форма, далі приклади), тому
+    переставляються групи, а не окремі картки. Для абетки ключ - перша
+    норвезька репліка групи.
     """
     groups = []
     for card in card_list:
@@ -222,15 +222,18 @@ def shuffle_cards(card_list):
             groups[-1].append(card)
         else:
             groups.append([card])
-    random.shuffle(groups)
-    return [card for group in groups for card in group]
+
+    entries = [
+        (group, orders.get(group[0].model, config.ORDER_LINEAR), group[0].sides['no'][0].text)
+        for group in groups
+    ]
+    return [card for group in note_cards.apply_order(entries) for card in group]
 
 
-async def build(query, notes, settings, cache, media_dir, field_map):
+async def build(query, notes, settings, cache, media_dir, field_map, orders):
     card_list, skipped = note_cards.build_cards(
         notes,
         settings.content.use_anki_media,
-        settings.content.include_note,
         field_map,
     )
     base_stats = {'skipped': skipped}
@@ -238,9 +241,8 @@ async def build(query, notes, settings, cache, media_dir, field_map):
         return None, base_stats
 
     # Порядок карток фіксований порядком нот з Anki, через що послідовність
-    # запамʼятовується разом зі словами. Перемішування робить кожен запуск іншим.
-    if settings.content.shuffle:
-        card_list = shuffle_cards(card_list)
+    # запамʼятовується разом зі словами. Пресет із order = "random" це знімає.
+    card_list = order_cards(card_list, orders)
 
     all_utterances = [u for card in card_list for u in card.utterances()]
     resolved, from_media = await resolve_paths(all_utterances, settings, cache, media_dir)
@@ -310,7 +312,9 @@ async def run(query, settings, client):
         lambda model: client.call('modelFieldNames', modelName=model),
         'audio',
     )
-    out_path, stats = await build(query, notes, settings, cache, media_dir, field_map)
+    out_path, stats = await build(
+        query, notes, settings, cache, media_dir, field_map, config.orders(presets, 'audio'),
+    )
     for model, count in sorted(stats['skipped'].items()):
         print('пропущено %d нот типу %s' % (count, model))
     if out_path is None:

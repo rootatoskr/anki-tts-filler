@@ -11,7 +11,6 @@ HTML тут не проміжний формат, а джерело: у PDF йо
 
 import html
 import os
-import random
 import shutil
 import subprocess
 import time
@@ -32,12 +31,11 @@ PDF_TIMEOUT = 60
 POLL_INTERVAL = 0.4
 
 CSS = '''@page { size: A4; margin: 12mm; }
-body { margin: 0; color: #000; background: #fff; font-family: "Helvetica Neue", Arial, sans-serif; font-size: 10.5pt; line-height: 1.35; }
+body { margin: 0; color: #000; background: #fff; font-family: "Helvetica Neue", Arial, sans-serif; font-size: 11pt; line-height: 1.35; }
 h1 { margin: 0 0 4mm; font-size: 11pt; font-weight: 600; }
 h1 span { color: #888; font-weight: 400; }
 .cards { column-count: 2; column-gap: 10mm; }
-.card { break-inside: avoid; margin: 0 0 4.5mm; }
-.num { font-size: 8pt; color: #999; }
+.card { break-inside: avoid; padding: 0 0 3.5mm; margin: 0 0 3.5mm; border-bottom: 0.4pt solid #ccc; }
 .line { white-space: pre-wrap; }
 '''
 
@@ -62,19 +60,19 @@ def note_lines(note, fields):
 
 def render(cards, query):
     blocks = []
-    for number, lines in enumerate(cards, 1):
-        rows = ['<div class="num">%d</div>' % number]
-        rows += ['<div class="line">%s</div>' % html.escape(text) for text in lines]
-        blocks.append('<div class="card">%s</div>' % ''.join(rows))
+    for lines in cards:
+        rows = ''.join('<div class="line">%s</div>' % html.escape(text) for text in lines)
+        blocks.append('<div class="card">%s</div>' % rows)
 
-    head = '%s <span>· карток: %d · %s</span>' % (
-        html.escape(query), len(cards), date.today().isoformat(),
-    )
+    # У заголовку запит без екранування: зворотний слеш - це синтаксис
+    # пошуку Anki, а не частина назви тегу
+    title = html.escape(query.replace('\\', ''))
+    head = '%s <span>· карток: %d · %s</span>' % (title, len(cards), date.today().isoformat())
     return (
         '<!doctype html>\n<html lang="no"><head><meta charset="utf-8">'
         '<title>%s</title><style>%s</style></head>\n<body>\n<h1>%s</h1>\n'
         '<div class="cards">\n%s\n</div>\n</body></html>\n'
-    ) % (html.escape(query), CSS, head, '\n'.join(blocks))
+    ) % (title, CSS, head, '\n'.join(blocks))
 
 
 def find_chrome():
@@ -167,24 +165,25 @@ def run(query, settings, client):
         'pdf',
     )
 
-    cards = []
+    entries = []
     skipped = {}
+    orders = config.orders(presets, 'pdf')
     for note in notes:
         fields = index.get(note['modelName'])
         lines = note_lines(note, fields) if fields else []
         if not lines:
             skipped[note['modelName']] = skipped.get(note['modelName'], 0) + 1
             continue
-        cards.append(lines)
+        # для абетки ключ - перший рядок картки
+        entries.append((lines, orders.get(note['modelName'], config.ORDER_LINEAR), lines[0]))
 
     for model, count in sorted(skipped.items()):
         print('пропущено %d нот типу %s' % (count, model))
-    if not cards:
+    if not entries:
         print('жодної придатної картки')
         return []
 
-    if settings.content.shuffle:
-        random.shuffle(cards)
+    cards = note_cards.apply_order(entries)
 
     os.makedirs(settings.output.dir, exist_ok=True)
     os.makedirs(settings.work_dir, exist_ok=True)
