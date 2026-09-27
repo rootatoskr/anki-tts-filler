@@ -10,8 +10,8 @@ audio_1 = "example_1"
 [audio]
 # "linear" - як у Anki, "random" - для фонового слухання, "sorted" - за абеткою
 order = "linear"
-no = ["example_1"]
-uk = ["translation_1"]
+target = ["example_1"]
+native = ["translation_1"]
 
 [pdf]
 # шпаргалку зручніше читати за абеткою першого рядка

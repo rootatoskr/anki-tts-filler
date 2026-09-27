@@ -1,7 +1,8 @@
-"""Перетворення нот Anki у картки з окремими норвезькою та українською сторонами.
+"""Перетворення нот Anki у картки з окремими сторонами target і native.
 
-Схема полів береться з секції [audio] у presets/*.toml: no - норвезька
-сторона, uk - переклад, examples - поле з прикладами.
+Схема полів береться з секції [audio] у presets/*.toml: target - сторона
+мови, яку вчать, native - переклад, examples - поле з прикладами. Конкретних
+мов тут немає: вони задаються голосами в settings.toml.
 """
 
 import html
@@ -23,12 +24,9 @@ WS_RE = re.compile(r'\s+')
 SPACE_PUNCT_RE = re.compile(r'\s+(?!\.\.)([.,!?;:])')
 DASH = '–'
 
-# Сортування шпаргалки: "en bok" має стояти на "b", а "å lese" на "l",
-# інакше всі іменники злипаються під артиклями, а дієслова під "å"
-SORT_PREFIXES = ('å ', 'en ', 'ei ', 'et ', 'den ', 'det ')
-# æ, ø, å - останні три літери норвезької абетки саме в цьому порядку,
-# а за кодами символів å опинилася б перед æ
-SORT_LAST_LETTERS = {'æ': 'zz1', 'ø': 'zz2', 'å': 'zz3'}
+# Ключ сортування для літер, що йдуть після "z": за кодами символів вони
+# опинилися б не там, де стоять в абетці цільової мови
+SORT_TAIL = 'zz%02d'
 
 
 def load_field_map(presets):
@@ -40,13 +38,15 @@ def load_field_map(presets):
     """
     field_map = {}
     for preset in presets:
-        if not preset.audio_no or not preset.audio_uk:
+        if not preset.audio_target or not preset.audio_native:
             continue
         media = preset.media_fields()
         field_map[preset.model_name] = {
             'sides': {
-                'no': [(text_field, media.get(text_field)) for text_field in preset.audio_no],
-                'uk': [(text_field, None) for text_field in preset.audio_uk],
+                config.LANG_TARGET: [
+                    (text_field, media.get(text_field)) for text_field in preset.audio_target
+                ],
+                config.LANG_NATIVE: [(text_field, None) for text_field in preset.audio_native],
             },
             'examples': preset.audio_examples,
         }
@@ -88,6 +88,12 @@ def media_name(raw):
     return match.group(1) if match else None
 
 
+def note_value(note, name):
+    """Значення поля ноти з notesInfo; відсутнє поле - порожній рядок."""
+    field_data = note['fields'].get(name)
+    return field_data['value'] if field_data else ''
+
+
 def split_lines(raw):
     for line in BR_RE.split(raw):
         text = clean_text(line)
@@ -96,11 +102,11 @@ def split_lines(raw):
 
 
 def note_pairs(raw):
-    """Розбирає поле ``note`` на пари 'норвезька – українська'.
+    """Розбирає поле з прикладами на пари 'цільова мова – переклад'.
 
     Розділювач - перший en dash у рядку: у правій частині він трапляється
     повторно ('En idé er et abstrakt ord. – Ідея – це абстрактне слово.').
-    Рядки без en dash - це українські граматичні пояснення, їх пропускаємо.
+    Рядки без en dash - це пояснення рідною мовою, їх пропускаємо.
     """
     for line in split_lines(raw):
         if DASH not in line:
@@ -112,11 +118,6 @@ def note_pairs(raw):
             yield left, right
 
 
-def _value(note, name):
-    field_data = note['fields'].get(name)
-    return field_data['value'] if field_data else ''
-
-
 def build_card(note, use_anki_media, field_map):
     mapping = field_map.get(note['modelName'])
     if mapping is None:
@@ -126,16 +127,16 @@ def build_card(note, use_anki_media, field_map):
     for lang, specs in mapping['sides'].items():
         utterances = []
         for text_field, audio_field in specs:
-            text = clean_text(_value(note, text_field))
+            text = clean_text(note_value(note, text_field))
             if not text:
                 continue
             media = None
             if use_anki_media and audio_field:
-                media = media_name(_value(note, audio_field))
+                media = media_name(note_value(note, audio_field))
             utterances.append(Utterance(text, lang, media))
         sides[lang] = utterances
 
-    if not sides.get('no') or not sides.get('uk'):
+    if not sides.get(config.LANG_TARGET) or not sides.get(config.LANG_NATIVE):
         return None
 
     return Card(note_id=note['noteId'], model=note['modelName'], sides=sides)
@@ -146,7 +147,7 @@ def build_note_cards(note, use_anki_media, field_map):
 
     Поле з прикладами задає ``examples`` у секції [audio] пресету. Приклади
     саме окремими картками: всередині однієї картки спершу звучать усі
-    норвезькі репліки і лише потім усі українські, тож пара
+    репліки цільової мови і лише потім усі переклади, тож пара
     "приклад - переклад" розсипалася б по різних кінцях картки.
     """
     card = build_card(note, use_anki_media, field_map)
@@ -156,26 +157,38 @@ def build_note_cards(note, use_anki_media, field_map):
     cards = [card]
     examples = field_map[note['modelName']]['examples']
     if examples:
-        for left, right in note_pairs(_value(note, examples)):
+        for left, right in note_pairs(note_value(note, examples)):
             cards.append(Card(
                 note_id=note['noteId'],
                 model=note['modelName'],
-                sides={'no': [Utterance(left, 'no')], 'uk': [Utterance(right, 'uk')]},
+                sides={
+                    config.LANG_TARGET: [Utterance(left, config.LANG_TARGET)],
+                    config.LANG_NATIVE: [Utterance(right, config.LANG_NATIVE)],
+                },
             ))
     return cards
 
 
-def sort_key(text):
-    """Ключ абетки: без початкового артикля і з æ/ø/å у кінці абетки."""
+def sort_key(text, language):
+    """Ключ абетки цільової мови: без початкового артикля і з її літерами в кінці.
+
+    Артиклі (``sort_prefixes``) і літери після "z" (``sort_extra_letters``)
+    задаються в секції [language] settings.toml - у самому коді ніякої
+    конкретної мови немає.
+    """
     lowered = text.strip().lower()
-    for prefix in SORT_PREFIXES:
-        if lowered.startswith(prefix):
+    for prefix in language.sort_prefixes:
+        if lowered.startswith(prefix.lower()):
             lowered = lowered[len(prefix):]
             break
-    return ''.join(SORT_LAST_LETTERS.get(char, char) for char in lowered)
+    tail = {
+        letter.lower(): SORT_TAIL % index
+        for index, letter in enumerate(language.sort_extra_letters)
+    }
+    return ''.join(tail.get(char, char) for char in lowered)
 
 
-def apply_order(entries):
+def apply_order(entries, language):
     """entries - [(елемент, порядок, текст для абетки)] у порядку з Anki.
 
     Елементи лінійних пресетів лишаються рівно там, де стояли; випадкові
@@ -191,7 +204,7 @@ def apply_order(entries):
         if mode == config.ORDER_RANDOM:
             random.shuffle(chosen)
         else:
-            chosen.sort(key=lambda entry: sort_key(entry[2]))
+            chosen.sort(key=lambda entry: sort_key(entry[2], language))
         for position, entry in zip(positions, chosen):
             ordered[position] = entry[0]
     return ordered

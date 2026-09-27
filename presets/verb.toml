@@ -10,8 +10,8 @@ audio_presens_perfektum = "presens_perfektum"
 [audio]
 # "linear" - як у Anki, "random" - для фонового слухання, "sorted" - за абеткою
 order = "linear"
-no = ["infinitiv", "presens", "preteritum", "presens_perfektum"]
-uk = ["infinitiv_uk"]
+target = ["infinitiv", "presens", "preteritum", "presens_perfektum"]
+native = ["infinitiv_uk"]
 
 [pdf]
 # шпаргалку зручніше читати за абеткою першого рядка

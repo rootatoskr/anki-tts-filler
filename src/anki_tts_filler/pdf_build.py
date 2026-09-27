@@ -2,7 +2,7 @@
 
 Той самий Anki-запит і ті самі пресети, але замість склейки mp3 - сторінка на
 друк: поля зі списку [pdf] fields, кожне окремим рядком, картки одна за одною.
-Поділу на норвезьку й українську сторони тут нема - поля йдуть підряд, у тому
+Поділу на сторони target і native тут нема - поля йдуть підряд, у тому
 порядку, в якому записані в пресеті.
 
 HTML тут не проміжний формат, а джерело: у PDF його переганяє headless Chrome,
@@ -52,13 +52,11 @@ def note_lines(note, fields):
     """
     lines = []
     for name in fields:
-        field = note['fields'].get(name)
-        if field:
-            lines.extend(note_cards.split_lines(field['value']))
+        lines.extend(note_cards.split_lines(note_cards.note_value(note, name)))
     return lines
 
 
-def render(cards, query):
+def render(cards, query, lang):
     blocks = []
     for lines in cards:
         rows = ''.join('<div class="line">%s</div>' % html.escape(text) for text in lines)
@@ -69,10 +67,10 @@ def render(cards, query):
     title = html.escape(query.replace('\\', ''))
     head = '%s <span>· карток: %d · %s</span>' % (title, len(cards), date.today().isoformat())
     return (
-        '<!doctype html>\n<html lang="no"><head><meta charset="utf-8">'
+        '<!doctype html>\n<html lang="%s"><head><meta charset="utf-8">'
         '<title>%s</title><style>%s</style></head>\n<body>\n<h1>%s</h1>\n'
         '<div class="cards">\n%s\n</div>\n</body></html>\n'
-    ) % (title, CSS, head, '\n'.join(blocks))
+    ) % (html.escape(lang, quote=True), title, CSS, head, '\n'.join(blocks))
 
 
 def find_chrome():
@@ -183,14 +181,14 @@ def run(query, settings, client):
         print('жодної придатної картки')
         return []
 
-    cards = note_cards.apply_order(entries)
+    cards = note_cards.apply_order(entries, settings.language)
 
     os.makedirs(settings.output.dir, exist_ok=True)
     os.makedirs(settings.work_dir, exist_ok=True)
     chrome = find_chrome()
     html_path = os.path.join(settings.output.dir, safe_name(query) + '.html')
     with open(html_path, 'w', encoding='utf-8') as handle:
-        handle.write(render(cards, query))
+        handle.write(render(cards, query, settings.language.code))
 
     out_path = to_pdf(chrome, html_path, os.path.join(settings.work_dir, 'chrome')) if chrome else html_path
     print('карток: %d' % len(cards))

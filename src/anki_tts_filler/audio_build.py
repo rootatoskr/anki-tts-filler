@@ -1,8 +1,8 @@
 """Оркестрація режиму audio: Anki-ноти -> озвучені сегменти -> один mp3.
 
-Не плутати з audio.py: та частина для режиму cards (коротке аудіо в поле
-Anki), тут - довга доріжка для прослуховування (норвезька -> пауза ->
-переклад -> пауза -> норвезька ще раз) по одному Anki-запиту за раз.
+Не плутати з audio.py: та частина для режимів cards і resync (коротке аудіо
+в поле Anki), тут - довга доріжка для прослуховування (цільова мова -> пауза
+-> переклад -> пауза -> цільова мова ще раз) по одному Anki-запиту за раз.
 """
 
 import asyncio
@@ -148,9 +148,9 @@ def duration(path):
 
 
 def voice_params(settings, lang):
-    if lang == 'no':
-        return settings.voice.no, settings.voice.rate_no, settings.voice.volume_no
-    return settings.voice.uk, settings.voice.rate_uk, settings.voice.volume_uk
+    if lang == config.LANG_TARGET:
+        return settings.voice.target, settings.voice.rate_target, settings.voice.volume_target
+    return settings.voice.native, settings.voice.rate_native, settings.voice.volume_native
 
 
 async def resolve_paths(utterances, settings, cache, media_dir):
@@ -190,9 +190,28 @@ def add_silence(sequence, silences, value):
         sequence.append(path)
 
 
-def assemble(card_list, resolved, gaps, silences):
+def side_gaps(order, gap):
+    """Пауза після кожної сторони, крім останньої.
+
+    Між двома повторами цільової мови пауза своя (between_repeats): after_target
+    це час на згадати переклад, і між повторами, що йдуть уже після перекладу,
+    така довга пауза зайва.
+    """
+    values = []
+    for index in range(len(order) - 1):
+        current, following = order[index], order[index + 1]
+        if current != config.LANG_TARGET:
+            values.append(gap.after_native)
+        elif following == config.LANG_TARGET:
+            values.append(gap.between_repeats)
+        else:
+            values.append(gap.after_target)
+    return values
+
+
+def assemble(card_list, resolved, plan, silences):
     """Розкладає картки в плоский список доріжок із паузами між ними."""
-    order = gaps['order']
+    order = plan['order']
     sequence = []
     for card_index, card in enumerate(card_list):
         last_side = len(order) - 1
@@ -201,20 +220,20 @@ def assemble(card_list, resolved, gaps, silences):
             for utterance_index, utterance in enumerate(utterances):
                 sequence.append(resolved[utterance])
                 if utterance_index < len(utterances) - 1:
-                    add_silence(sequence, silences, gaps['within_side'])
+                    add_silence(sequence, silences, plan['within_side'])
             if side_index < last_side:
-                add_silence(sequence, silences, gaps['after_%s' % side])
+                add_silence(sequence, silences, plan['after'][side_index])
         if card_index < len(card_list) - 1:
-            add_silence(sequence, silences, gaps['between_cards'])
+            add_silence(sequence, silences, plan['between_cards'])
     return sequence
 
 
-def order_cards(card_list, orders):
+def order_cards(card_list, orders, language):
     """Розкладає картки за порядком із пресетів, не розриваючи ноту.
 
     Картки однієї ноти йдуть поспіль (основна форма, далі приклади), тому
     переставляються групи, а не окремі картки. Для абетки ключ - перша
-    норвезька репліка групи.
+    репліка цільової мови в групі.
     """
     groups = []
     for card in card_list:
@@ -224,10 +243,14 @@ def order_cards(card_list, orders):
             groups.append([card])
 
     entries = [
-        (group, orders.get(group[0].model, config.ORDER_LINEAR), group[0].sides['no'][0].text)
+        (
+            group,
+            orders.get(group[0].model, config.ORDER_LINEAR),
+            group[0].sides[config.LANG_TARGET][0].text,
+        )
         for group in groups
     ]
-    return [card for group in note_cards.apply_order(entries) for card in group]
+    return [card for group in note_cards.apply_order(entries, language) for card in group]
 
 
 async def build(query, notes, settings, cache, media_dir, field_map, orders):
@@ -242,7 +265,7 @@ async def build(query, notes, settings, cache, media_dir, field_map, orders):
 
     # Порядок карток фіксований порядком нот з Anki, через що послідовність
     # запамʼятовується разом зі словами. Пресет із order = "random" це знімає.
-    card_list = order_cards(card_list, orders)
+    card_list = order_cards(card_list, orders, settings.language)
 
     all_utterances = [u for card in card_list for u in card.utterances()]
     resolved, from_media = await resolve_paths(all_utterances, settings, cache, media_dir)
@@ -253,23 +276,22 @@ async def build(query, notes, settings, cache, media_dir, field_map, orders):
     formats = probe_formats(voice_paths)
     base_format = max(set(formats.values()), key=list(formats.values()).count)
 
-    # no -> uk -> no, повторений settings.content.repeat_no разів
-    order = ['no', 'uk'] + ['no'] * settings.content.repeat_no
-    gaps = {
+    # target -> native -> target, повторений settings.content.repeat_target разів
+    order = [config.LANG_TARGET, config.LANG_NATIVE]
+    order += [config.LANG_TARGET] * settings.content.repeat_target
+    plan = {
         'order': order,
-        'after_no': settings.gap.after_no,
-        'after_uk': settings.gap.after_uk,
+        'after': side_gaps(order, settings.gap),
         'within_side': settings.gap.within_side,
         'between_cards': settings.gap.between_cards,
     }
     silences = {}
-    for key in ('after_no', 'after_uk', 'within_side', 'between_cards'):
-        value = gaps[key]
+    for value in [*plan['after'], plan['within_side'], plan['between_cards']]:
         if value > 0 and value not in silences:
             silences[value] = make_silence(settings.work_dir, value, base_format)
     formats.update({path: base_format for path in silences.values()})
 
-    sequence = assemble(card_list, resolved, gaps, silences)
+    sequence = assemble(card_list, resolved, plan, silences)
     label = safe_name(query)
     out_path = os.path.join(settings.output.dir, label + '.mp3')
     list_path = os.path.join(settings.work_dir, label + '.txt')

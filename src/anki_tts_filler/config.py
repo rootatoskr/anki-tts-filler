@@ -16,6 +16,11 @@ AUDIO_CACHE_DIR = 'audio_cache'
 
 ANKICONNECT_URL = 'http://127.0.0.1:8765'
 
+# Сторони картки: мова, яку вчать, і мова, якою знають. Конкретні мови ніде
+# в коді не зашиті - вони задаються голосами в settings.toml
+LANG_TARGET = 'target'
+LANG_NATIVE = 'native'
+
 # Порядок карток: як у Anki, перемішаний або за абеткою
 ORDER_LINEAR = 'linear'
 ORDER_RANDOM = 'random'
@@ -39,16 +44,17 @@ model_name = "MyNoteType"
 [cards]
 audio_field_one = "field_one"
 
-# Режим audio: no - норвезька сторона, uk - переклад. Порядок полів у списку
-# = черга озвучення. Готові [sound:...] беруться за мапінгом із секції [cards].
-# examples - поле з прикладами "норвезька - переклад" через en dash; кожна
-# пара стає окремою карткою. Без ключа приклади не озвучуються.
+# Режим audio: target - сторона мови, яку вчать, native - переклад. Порядок
+# полів у списку = черга озвучення. Готові [sound:...] беруться за мапінгом
+# із секції [cards].
+# examples - поле з прикладами "цільова мова - переклад" через en dash;
+# кожна пара стає окремою карткою. Без ключа приклади не озвучуються.
 # order - порядок карток: "linear" (як у Anki), "random" (для фонового
 # слухання, щоб не вчилася послідовність) або "sorted" (за абеткою).
 [audio]
 order = "linear"
-no = ["field_one"]
-uk = ["field_translation"]
+target = ["field_one"]
+native = ["field_translation"]
 examples = "note"
 
 # Режим pdf: рядки картки в цьому ж порядку. Порожнє поле рядка не дає.
@@ -58,40 +64,68 @@ order = "sorted"
 fields = ["field_one", "field_translation", "note"]
 '''
 
-SETTINGS_TEMPLATE = '''# Налаштування обох режимів. Режим cards бере звідси anki_url, concurrency
-# і норвезький голос (voice.no, voice.rate_no, voice.volume_no); секції gap,
-# content і output стосуються лише режиму audio.
+SETTINGS_TEMPLATE = '''# Налаштування усіх режимів. Режими cards і resync беруть звідси anki_url,
+# concurrency і голос цільової мови (voice.target, voice.rate_target,
+# voice.volume_target); секції gap, content і output стосуються лише режиму
+# audio, секція language - сортування за абеткою й мови сторінки на друк.
 anki_url = "http://127.0.0.1:8765"
 cache_dir = ".cache/tts"
 work_dir = ".cache/work"
 concurrency = 8
 
 [voice]
-no = "nb-NO-FinnNeural"
-uk = "uk-UA-PolinaNeural"
-rate_no = "-40%"
-rate_uk = "+0%"
-volume_no = "+0%"
-volume_uk = "+0%"
+# target - мова, яку вчать, native - мова, якою знають
+target = "nb-NO-FinnNeural"
+native = "uk-UA-PolinaNeural"
+rate_target = "-40%"
+rate_native = "+0%"
+volume_target = "+0%"
+volume_native = "+0%"
+
+[language]
+# Код мови для атрибута lang сторінки на друк
+code = "no"
+# Артиклі й частки, які не враховуються при сортуванні за абеткою:
+# "en bok" стає на "b", "å lese" на "l"
+sort_prefixes = ["å ", "en ", "ei ", "et ", "den ", "det "]
+# Літери, які в абетці цільової мови йдуть після "z" - у тому ж порядку,
+# що й у самій абетці
+sort_extra_letters = ["æ", "ø", "å"]
 
 [gap]
-# Пауза після норвезької: час на згадати переклад. 0 - без паузи.
-after_no = 1.2
-# Пауза після української: коротка, далі йде повтор норвезької.
-after_uk = 0.4
+# Пауза після цільової мови: час на згадати переклад. 0 - без паузи.
+after_target = 1.2
+# Пауза після перекладу: коротка, далі йде повтор цільової мови.
+after_native = 0.4
 # Пауза між формами однієї сторони (infinitiv/presens/preteritum).
 within_side = 0.5
+# Пауза між повторами цільової мови (content.repeat_target > 1).
+between_repeats = 0.4
 between_cards = 1.5
 
 [content]
-# Скільки разів норвезька повторюється після перекладу: no -> uk -> no (repeat_no разів)
-repeat_no = 1
+# Скільки разів цільова мова повторюється після перекладу:
+# target -> native -> target (repeat_target разів)
+repeat_target = 1
 use_anki_media = true
 
 [output]
 dir = "out"
 bitrate = "48k"
 '''
+
+# Перейменовані ключі settings.toml: повний шлях старого -> новий
+RENAMED_SETTINGS = {
+    'voice.no': 'voice.target',
+    'voice.uk': 'voice.native',
+    'voice.rate_no': 'voice.rate_target',
+    'voice.rate_uk': 'voice.rate_native',
+    'voice.volume_no': 'voice.volume_target',
+    'voice.volume_uk': 'voice.volume_native',
+    'gap.after_no': 'gap.after_target',
+    'gap.after_uk': 'gap.after_native',
+    'content.repeat_no': 'content.repeat_target',
+}
 
 
 class SettingsError(Exception):
@@ -100,26 +134,37 @@ class SettingsError(Exception):
 
 @dataclass
 class VoiceConfig:
-    no: str = 'nb-NO-FinnNeural'
-    uk: str = 'uk-UA-PolinaNeural'
-    rate_no: str = '-40%'
-    rate_uk: str = '+0%'
-    volume_no: str = '+0%'
-    volume_uk: str = '+0%'
+    target: str = 'nb-NO-FinnNeural'
+    native: str = 'uk-UA-PolinaNeural'
+    rate_target: str = '-40%'
+    rate_native: str = '+0%'
+    volume_target: str = '+0%'
+    volume_native: str = '+0%'
+
+
+@dataclass
+class LanguageConfig:
+    """Те, що залежить від конкретної цільової мови, а не від схеми карток."""
+
+    code: str = 'no'
+    sort_prefixes: list = field(default_factory=lambda: ['å ', 'en ', 'ei ', 'et ', 'den ', 'det '])
+    sort_extra_letters: list = field(default_factory=lambda: ['æ', 'ø', 'å'])
 
 
 @dataclass
 class GapConfig:
-    after_no: float = 1.2
-    after_uk: float = 0.4
+    after_target: float = 1.2
+    after_native: float = 0.4
     within_side: float = 0.5
+    between_repeats: float = 0.4
     between_cards: float = 1.5
 
 
 @dataclass
 class ContentConfig:
-    # Скільки разів норвезька повторюється після перекладу: no -> uk -> no*repeat_no
-    repeat_no: int = 1
+    # Скільки разів цільова мова повторюється після перекладу:
+    # target -> native -> target*repeat_target
+    repeat_target: int = 1
     use_anki_media: bool = True
 
 
@@ -136,6 +181,7 @@ class Settings:
     work_dir: str = '.cache/work'
     concurrency: int = 8
     voice: VoiceConfig = field(default_factory=VoiceConfig)
+    language: LanguageConfig = field(default_factory=LanguageConfig)
     gap: GapConfig = field(default_factory=GapConfig)
     content: ContentConfig = field(default_factory=ContentConfig)
     output: OutputConfig = field(default_factory=OutputConfig)
@@ -144,10 +190,11 @@ class Settings:
 def _checked(value, expected, path):
     """Значення з TOML проти типу поля дата-класу.
 
-    ``bool`` у Python - підклас ``int``, тому ``repeat_no = true`` без цієї
+    ``bool`` у Python - підклас ``int``, тому ``repeat_target = true`` без цієї
     перевірки тихо перетворилося б на 1. Для float приймається і ціле з TOML
-    (``after_no = 2``), але одразу зводиться до float, щоб однакові паузи не
-    давали двох різних файлів тиші.
+    (``after_target = 2``), але одразу зводиться до float, щоб однакові паузи
+    не давали двох різних файлів тиші. Список приймається тільки з рядків:
+    решта типів у назвах літер і артиклів сенсу не має.
     """
     if expected is float:
         if isinstance(value, bool) or not isinstance(value, (int, float)):
@@ -155,16 +202,27 @@ def _checked(value, expected, path):
         return float(value)
     if expected is int and isinstance(value, bool):
         raise SettingsError('%s: очікується ціле число, а не bool' % path)
+    if expected is list:
+        if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+            raise SettingsError('%s: очікується список рядків' % path)
+        return value
     if not isinstance(value, expected):
         raise SettingsError('%s: очікується %s, а не %s' % (path, expected.__name__, type(value).__name__))
     return value
+
+
+def _unknown_key(path):
+    renamed = RENAMED_SETTINGS.get(path)
+    if renamed:
+        raise SettingsError('ключ %s перейменовано на %s' % (path, renamed))
+    raise SettingsError('невідомий ключ %s' % path)
 
 
 def _apply_section(target, values, prefix):
     known = {f.name: f.type for f in fields(target)}
     for key, value in values.items():
         if key not in known:
-            raise SettingsError('невідомий ключ %s%s' % (prefix, key))
+            _unknown_key(prefix + key)
         setattr(target, key, _checked(value, known[key], prefix + key))
 
 
@@ -186,7 +244,7 @@ def load_settings(path=None):
     known = {f.name: f.type for f in fields(settings)}
     for key, value in raw.items():
         if key not in known:
-            raise SettingsError('невідомий ключ %s' % key)
+            _unknown_key(key)
         current = getattr(settings, key)
         if is_dataclass(current):
             if not isinstance(value, dict):
@@ -195,12 +253,12 @@ def load_settings(path=None):
         else:
             setattr(settings, key, _checked(value, known[key], key))
 
-    if settings.content.repeat_no < 0:
-        raise SettingsError('content.repeat_no має бути >= 0')
+    if settings.content.repeat_target < 0:
+        raise SettingsError('content.repeat_target має бути >= 0')
     if settings.concurrency < 1:
         raise SettingsError('concurrency має бути >= 1')
     # Відʼємна пауза для ffmpeg - помилка, нульова означає "без паузи"
-    for name in ('after_no', 'after_uk', 'within_side', 'between_cards'):
+    for name in ('after_target', 'after_native', 'within_side', 'between_repeats', 'between_cards'):
         if getattr(settings.gap, name) < 0:
             raise SettingsError('gap.%s не може бути відʼємним' % name)
 
@@ -214,21 +272,32 @@ _DECK_LINE_RE = re.compile(r'(?m)^deck\s*:\s*(.+)$')
 
 _DECK_PREFIX_RE = re.compile(r'^deck\s*:\s*')
 
+# Ключі верхнього рівня пресету і секції, які розбирає _parse_sections
+PRESET_KEYS = ('deck_name', 'model_name')
+PRESET_SECTIONS = ('cards', 'audio', 'pdf')
+
+# Перейменовані ключі пресетів: шлях старого -> новий
+RENAMED_PRESET_KEYS = {
+    'audio.no': 'audio.target',
+    'audio.uk': 'audio.native',
+}
+
 
 class PresetError(SettingsError):
     pass
 
 
 class Preset:
-    def __init__(self, name, deck_name, model_name, cards, audio_no, audio_uk, audio_examples, audio_order, pdf_fields, pdf_order):
+    def __init__(self, name, deck_name, model_name, cards, audio_target, audio_native, audio_examples, audio_order, pdf_fields, pdf_order):
         self.name = name
         self.deck_name = deck_name
         self.model_name = model_name
         # cards: {аудіополе: текстове поле}; решта - списки полів у порядку виводу
         self.cards = cards
-        self.audio_no = audio_no
-        self.audio_uk = audio_uk
-        # поле з прикладами "норвезька - переклад"; порожнє - прикладів нема
+        # target - сторона мови, яку вчать, native - переклад
+        self.audio_target = audio_target
+        self.audio_native = audio_native
+        # поле з прикладами "цільова мова - переклад"; порожнє - прикладів нема
         self.audio_examples = audio_examples
         self.pdf_fields = pdf_fields
         # порядок карток окремо для кожного режиму: слухання й друк
@@ -254,10 +323,10 @@ class Preset:
         if mode == 'pdf':
             return set(self.pdf_fields)
         media = self.media_fields()
-        used = set(self.audio_no) | set(self.audio_uk)
+        used = set(self.audio_target) | set(self.audio_native)
         if self.audio_examples:
             used.add(self.audio_examples)
-        return used | {media[name] for name in self.audio_no if name in media}
+        return used | {media[name] for name in self.audio_target if name in media}
 
 
 def presets_path():
@@ -301,6 +370,21 @@ def _section(schema, name, preset_name):
     return value
 
 
+def _unknown_preset_keys(found, known, path, preset_name):
+    """Невідомі ключі як помилка, з окремим текстом для перейменованих."""
+    unknown = sorted(set(found) - set(known))
+    if not unknown:
+        return
+    renamed = [
+        '%s -> %s' % (name, RENAMED_PRESET_KEYS['%s.%s' % (path, name)])
+        for name in unknown
+        if '%s.%s' % (path, name) in RENAMED_PRESET_KEYS
+    ]
+    if renamed:
+        raise PresetError('%s: у [%s] перейменовані ключі: %s' % (preset_name, path, ', '.join(renamed)))
+    raise PresetError('%s: у [%s] невідомі ключі: %s' % (preset_name, path, ', '.join(unknown)))
+
+
 def _parse_order(section, path, preset_name):
     # Без ключа - лінійно: порядок з Anki передбачуваний, решту вмикають свідомо
     order = section.get('order', ORDER_LINEAR)
@@ -309,6 +393,20 @@ def _parse_order(section, path, preset_name):
             preset_name, path, ', '.join('"%s"' % value for value in ORDERS), order,
         ))
     return order
+
+
+def _required_name(schema, key, preset_name):
+    """Обовʼязковий рядковий ключ верхнього рівня.
+
+    Без цієї перевірки відсутній deck_name падав би KeyError, тобто
+    трейсбеком замість повідомлення про помилку в пресеті.
+    """
+    value = schema.get(key)
+    if value is None:
+        raise PresetError('%s: немає обовʼязкового ключа %s' % (preset_name, key))
+    if not isinstance(value, str):
+        raise PresetError('%s: %s має бути рядком, а не %s' % (preset_name, key, type(value).__name__))
+    return value
 
 
 def _parse_sections(schema, preset_name):
@@ -330,31 +428,33 @@ def _parse_sections(schema, preset_name):
             % preset_name
         )
 
+    # Одруківка в назві ключа верхнього рівня (modle_name) інакше лишалася б
+    # непоміченою: model_name узявся б з-за замовчування, тобто нізвідки
+    unknown = sorted(set(schema) - set(PRESET_KEYS) - set(PRESET_SECTIONS))
+    if unknown:
+        raise PresetError('%s: невідомі ключі: %s' % (preset_name, ', '.join(unknown)))
+
     cards = _section(schema, 'cards', preset_name)
     for audio_field, text_field in cards.items():
         if not isinstance(text_field, str):
             raise PresetError('%s: [cards] %s має бути назвою текстового поля' % (preset_name, audio_field))
 
     audio = _section(schema, 'audio', preset_name)
-    unknown = sorted(set(audio) - {'no', 'uk', 'examples', 'order'})
-    if unknown:
-        raise PresetError('%s: у [audio] невідомі ключі: %s' % (preset_name, ', '.join(unknown)))
-    audio_no = _string_list(audio.get('no', []), 'audio.no', preset_name)
-    audio_uk = _string_list(audio.get('uk', []), 'audio.uk', preset_name)
+    _unknown_preset_keys(audio, ('target', 'native', 'examples', 'order'), 'audio', preset_name)
+    audio_target = _string_list(audio.get('target', []), 'audio.target', preset_name)
+    audio_native = _string_list(audio.get('native', []), 'audio.native', preset_name)
     audio_examples = audio.get('examples', '')
     if not isinstance(audio_examples, str):
         raise PresetError('%s: audio.examples має бути назвою поля' % preset_name)
 
     pdf = _section(schema, 'pdf', preset_name)
-    unknown = sorted(set(pdf) - {'fields', 'order'})
-    if unknown:
-        raise PresetError('%s: у [pdf] невідомі ключі: %s' % (preset_name, ', '.join(unknown)))
+    _unknown_preset_keys(pdf, ('fields', 'order'), 'pdf', preset_name)
     pdf_fields = _string_list(pdf.get('fields', []), 'pdf.fields', preset_name)
 
     return (
         cards,
-        audio_no,
-        audio_uk,
+        audio_target,
+        audio_native,
         audio_examples,
         _parse_order(audio, 'audio.order', preset_name),
         pdf_fields,
@@ -372,10 +472,10 @@ def field_roles(preset):
     for audio_field, text_field in preset.cards.items():
         roles.setdefault(text_field, []).append('cards')
         roles.setdefault(audio_field, []).append('cards:аудіо')
-    for text_field in preset.audio_no:
-        roles.setdefault(text_field, []).append('audio:no')
-    for text_field in preset.audio_uk:
-        roles.setdefault(text_field, []).append('audio:uk')
+    for text_field in preset.audio_target:
+        roles.setdefault(text_field, []).append('audio:target')
+    for text_field in preset.audio_native:
+        roles.setdefault(text_field, []).append('audio:native')
     if preset.audio_examples:
         roles.setdefault(preset.audio_examples, []).append('audio:examples')
     for text_field in preset.pdf_fields:
@@ -423,13 +523,18 @@ def load_preset(name):
         raw = raw[:match.start()] + raw[match.end():]
 
     schema = tomllib.loads(raw)
-    deck_name = deck_override if deck_override is not None else schema['deck_name']
+    label = 'presets/%s.toml' % name
+    if deck_override is not None:
+        deck_name = deck_override
+        schema.pop('deck_name', None)
+    else:
+        deck_name = _required_name(schema, 'deck_name', label)
 
     return Preset(
         name,
         _normalize_name(deck_name),
-        _normalize_name(schema['model_name']),
-        *_parse_sections(schema, 'presets/%s.toml' % name),
+        _normalize_name(_required_name(schema, 'model_name', label)),
+        *_parse_sections(schema, label),
     )
 
 

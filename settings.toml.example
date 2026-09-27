@@ -1,31 +1,46 @@
-# Налаштування обох режимів. Режим cards бере звідси anki_url, concurrency
-# і норвезький голос (voice.no, voice.rate_no, voice.volume_no); секції gap,
-# content і output стосуються лише режиму audio.
+# Налаштування усіх режимів. Режими cards і resync беруть звідси anki_url,
+# concurrency і голос цільової мови (voice.target, voice.rate_target,
+# voice.volume_target); секції gap, content і output стосуються лише режиму
+# audio, секція language - сортування за абеткою й мови сторінки на друк.
 anki_url = "http://127.0.0.1:8765"
 cache_dir = ".cache/tts"
 work_dir = ".cache/work"
 concurrency = 8
 
 [voice]
-no = "nb-NO-FinnNeural"
-uk = "uk-UA-PolinaNeural"
-rate_no = "-40%"
-rate_uk = "+0%"
-volume_no = "+0%"
-volume_uk = "+0%"
+# target - мова, яку вчать, native - мова, якою знають
+target = "nb-NO-FinnNeural"
+native = "uk-UA-PolinaNeural"
+rate_target = "-40%"
+rate_native = "+0%"
+volume_target = "+0%"
+volume_native = "+0%"
+
+[language]
+# Код мови для атрибута lang сторінки на друк
+code = "no"
+# Артиклі й частки, які не враховуються при сортуванні за абеткою:
+# "en bok" стає на "b", "å lese" на "l"
+sort_prefixes = ["å ", "en ", "ei ", "et ", "den ", "det "]
+# Літери, які в абетці цільової мови йдуть після "z" - у тому ж порядку,
+# що й у самій абетці
+sort_extra_letters = ["æ", "ø", "å"]
 
 [gap]
-# Пауза після норвезької: час на згадати переклад. 0 - без паузи.
-after_no = 1.2
-# Пауза після української: коротка, далі йде повтор норвезької.
-after_uk = 0.4
+# Пауза після цільової мови: час на згадати переклад. 0 - без паузи.
+after_target = 1.2
+# Пауза після перекладу: коротка, далі йде повтор цільової мови.
+after_native = 0.4
 # Пауза між формами однієї сторони (infinitiv/presens/preteritum).
 within_side = 0.5
+# Пауза між повторами цільової мови (content.repeat_target > 1).
+between_repeats = 0.4
 between_cards = 1.5
 
 [content]
-# Скільки разів норвезька повторюється після перекладу: no -> uk -> no (repeat_no разів)
-repeat_no = 1
+# Скільки разів цільова мова повторюється після перекладу:
+# target -> native -> target (repeat_target разів)
+repeat_target = 1
 use_anki_media = true
 
 [output]

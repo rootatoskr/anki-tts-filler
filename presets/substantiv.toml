@@ -10,8 +10,8 @@ audio_bestemt_flertall = "bestemt_flertall"
 [audio]
 # "linear" - як у Anki, "random" - для фонового слухання, "sorted" - за абеткою
 order = "linear"
-no = ["substantiv", "bestemt_ental", "ubestemt_flertall", "bestemt_flertall"]
-uk = ["substantiv_uk"]
+target = ["substantiv", "bestemt_ental", "ubestemt_flertall", "bestemt_flertall"]
+native = ["substantiv_uk"]
 
 [pdf]
 # шпаргалку зручніше читати за абеткою першого рядка
