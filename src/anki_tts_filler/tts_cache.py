@@ -78,7 +78,10 @@ class TtsCache:
                 _remove(partial)
                 raise TtsError('edge-tts повернув порожній файл для %r' % text)
             try:
-                self.postprocess(partial)
+                # У потоці, бо postprocess - це синхронний ffmpeg: у самому
+                # loop він блокував би всі інші синтези, зводячи concurrency
+                # до одного файлу за раз
+                await asyncio.to_thread(self.postprocess, partial)
             except Exception as exc:
                 _remove(partial)
                 raise TtsError('не вдалося обробити аудіо для %r: %s' % (text, exc)) from exc
