@@ -1,17 +1,19 @@
-"""TTS для режиму cards: коротке аудіо в поле ноти Anki.
+"""TTS для режимів cards і resync: коротке аудіо в поле ноти Anki.
 
 Синтез, кеш і повтори спільні з режимом audio (tts_cache.py); тут лише своя
-схема імен файлів (як у медіатеці Anki) і обрізання тиші.
+схема імен файлів (як у медіатеці Anki), обрізання тиші й заливання нових
+файлів у медіатеку.
 """
 
 import asyncio
+import base64
 import hashlib
 import os
 import re
 import shutil
 import subprocess
 
-from .config import MEDIA_PREFIX
+from .config import AUDIO_CACHE_DIR, MEDIA_PREFIX
 from .tts_cache import TtsCache
 
 
@@ -29,6 +31,11 @@ def ffmpeg_available():
 
 def media_pattern():
     return f'{MEDIA_PREFIX}*.mp3'
+
+
+def cache_path():
+    """Кеш згенерованих mp3 - поруч із cards.txt, у директорії запуску."""
+    return os.path.join(os.getcwd(), AUDIO_CACHE_DIR)
 
 
 def _trim_silence(path):
@@ -75,3 +82,32 @@ def generate(texts, cache_dir, voice, rate, volume, concurrency):
         return await asyncio.gather(*[cache.synthesize(t, voice, rate, volume) for t in ordered])
 
     return dict(zip(ordered, asyncio.run(run_all())))
+
+
+def sync_media(texts, cache_dir, client, settings):
+    """Тексти -> {текст: шлях до mp3}, нові файли залиті в медіатеку Anki.
+
+    Спільний крок режимів cards і resync: озвучення голосом цільової мови
+    плюс заливання. Різниця між режимами лишається тільки в тому, звідки
+    беруться самі тексти.
+    """
+    audio_map = generate(
+        texts,
+        cache_dir,
+        settings.voice.target,
+        settings.voice.rate_target,
+        settings.voice.volume_target,
+        settings.concurrency,
+    )
+
+    # Уже наявні в медіатеці Anki файли повторно не заливаються
+    existing = set(client.call('getMediaFilesNames', pattern=media_pattern()))
+    for path in audio_map.values():
+        name = os.path.basename(path)
+        if name in existing:
+            continue
+        with open(path, 'rb') as f:
+            data = base64.b64encode(f.read()).decode('ascii')
+        client.call('storeMediaFile', filename=name, data=data)
+
+    return audio_map

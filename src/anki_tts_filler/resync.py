@@ -6,50 +6,26 @@
 й аудіо, і кеш (audio_cache/) ті самі, що в cards.
 """
 
-import base64
 import os
 
 from . import config
-from .audio import strip_html, sound_tag, generate, ffmpeg_available, media_pattern
+from .audio import cache_path, ffmpeg_available, sound_tag, strip_html, sync_media
+from .note_cards import note_value
 
 
 class ResyncError(Exception):
     pass
 
 
-def _value(note, name):
-    field = note['fields'].get(name)
-    return field['value'] if field else ''
-
-
-def build_audio_map(notes, index, cache_dir, client, settings):
+def source_texts(notes, index):
+    """Тексти всіх полів, з яких треба переозвучити аудіо цих нот."""
     texts = set()
     for note in notes:
         for text_field in set(index[note['modelName']].values()):
-            text = strip_html(_value(note, text_field))
+            text = strip_html(note_value(note, text_field))
             if text:
                 texts.add(text)
-
-    audio_map = generate(
-        texts,
-        cache_dir,
-        settings.voice.no,
-        settings.voice.rate_no,
-        settings.voice.volume_no,
-        settings.concurrency,
-    )
-
-    # Уже наявні в медіатеці Anki файли повторно не заливаються
-    existing = set(client.call('getMediaFilesNames', pattern=media_pattern()))
-    for path in audio_map.values():
-        name = os.path.basename(path)
-        if name in existing:
-            continue
-        with open(path, 'rb') as f:
-            data = base64.b64encode(f.read()).decode('ascii')
-        client.call('storeMediaFile', filename=name, data=data)
-
-    return audio_map
+    return texts
 
 
 def run(query, settings, client):
@@ -87,18 +63,18 @@ def run(query, settings, client):
         print('жодної придатної ноти')
         return False
 
-    cache_dir = os.path.join(os.getcwd(), config.AUDIO_CACHE_DIR)
+    cache_dir = cache_path()
     os.makedirs(cache_dir, exist_ok=True)
-    audio_map = build_audio_map(candidates, index, cache_dir, client, settings)
+    audio_map = sync_media(source_texts(candidates, index), cache_dir, client, settings)
 
     updated = 0
     unchanged = 0
     for note in candidates:
         fields = {}
         for audio_field, text_field in index[note['modelName']].items():
-            text = strip_html(_value(note, text_field))
+            text = strip_html(note_value(note, text_field))
             new_value = sound_tag(audio_map[text]) if text else ''
-            if new_value != _value(note, audio_field):
+            if new_value != note_value(note, audio_field):
                 fields[audio_field] = new_value
         if not fields:
             unchanged += 1
