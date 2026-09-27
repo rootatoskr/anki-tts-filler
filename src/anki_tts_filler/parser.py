@@ -1,3 +1,9 @@
+# Рядок "tags: a b" задає теги ноти, а не поле нотетайпу. Якщо в нотетайпі
+# справді є поле з такою назвою, воно має пріоритет: тоді теги задаються
+# тільки прапорцем --tag
+TAGS_KEY = 'tags'
+
+
 def split_blocks(text):
     blocks = []
     current = []
@@ -15,17 +21,24 @@ def split_blocks(text):
 
 
 def parse_card(lines, text_fields):
-    # Відсутнє поле лишається порожнім, зайве/невідоме поле – помилка картки
+    """Блок рядків -> (поля, теги, помилка).
+
+    Відсутнє поле лишається порожнім, зайве/невідоме поле - помилка картки.
+    """
     card = {f: '' for f in text_fields}
+    tags = []
     for line in lines:
         if ':' not in line:
-            return None, f'рядок без ":" – {line}'
+            return None, None, f'рядок без ":" – {line}'
         key, value = line.split(':', 1)
         key = key.strip()
+        if key == TAGS_KEY and key not in card:
+            tags.extend(value.split())
+            continue
         if key not in card:
-            return None, f'невідоме поле "{key}"'
+            return None, None, f'невідоме поле "{key}"'
         card[key] = value.strip()
-    return card, None
+    return card, tags, None
 
 
 def split_cards(text, text_fields):
