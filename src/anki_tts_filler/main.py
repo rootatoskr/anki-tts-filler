@@ -9,50 +9,58 @@ Anki через AnkiConnect: заповнення карток TTS-аудіо і
     uv run anki-tts-filler pdf '<query>'
 
 Anki має бути запущений з увімкненим аддоном AnkiConnect. Схема полів (яка
-колода/notetype, які поля норвезькі/переклад/аудіо) задається спільно для
-обох режимів у presets/<preset>.toml, голос і адреса AnkiConnect - у
-settings.toml.
+колода/notetype, які поля цільової мови/перекладу/аудіо) задається спільно
+для всіх режимів у presets/<preset>.toml, голоси й адреса AnkiConnect - у
+settings.toml. Конкретних мов у коді немає: сторони називаються target
+(мова, яку вчать) і native (мова, якою знають).
 
 Режим cards: список карток вставляється у cards.txt (у директорії запуску),
-до Anki додаються нові ноти.
+до Anki додаються нові ноти. Теги - рядком "tags: a b" у картці або
+прапорцем --tag.
 
 Режим audio: query - Anki-запит (той самий синтаксис, що й у Навігаторі,
 напр. tag:no\\_familie або deck:language-no); з нот, що підійшли під запит,
-клеїться один mp3 (норвезька -> пауза -> переклад -> пауза -> норвезька ще
-раз). Налаштування голосу й пауз - у settings.toml.
+клеїться один mp3 (цільова мова -> пауза -> переклад -> пауза -> цільова
+мова ще раз). Налаштування голосів і пауз - у settings.toml.
 
 Режим pdf: та сама вибірка, що й audio, але на друк - кожне поле картки
-окремим рядком. Поки що виходить три варіанти верстки на вибір.
+окремим рядком.
 
 Режим resync: query - той самий Anki-запит, що й у audio/pdf. Аудіополя з
 [cards] пресету переозвучуються за поточним текстом відповідних полів уже
 існуючих нот - для картки, яку відредагували вручну після створення.
+
+Режим prune: згенеровані mp3, на які вже не посилається жодна нота. Типово
+лише звіт, видалення - з --apply.
 """
 
 import asyncio
 import sys
 import os
-import base64
 
-from . import config, audio_build, draft, pdf_build, resync
+from . import config, audio_build, draft, pdf_build, prune, resync
 from .parser import split_cards, build_fields
-from .audio import generate, strip_html, sound_tag, ffmpeg_available, media_pattern
+from .audio import cache_path, strip_html, sound_tag, ffmpeg_available, sync_media
 from .ankiconnect import AnkiConnect, AnkiConnectError
 from .audio_build import AudioError
 from .pdf_build import PdfError
+from .prune import PruneError
 from .resync import ResyncError
 from .config import SettingsError
 from .tts_cache import TtsError
 
+MODES = ('cards', 'audio', 'pdf', 'resync', 'prune', 'presets', 'draft')
+
 
 def usage():
     print('Використання:')
-    print("  anki cards <preset>")
+    print('  anki cards <preset> [--tag <назва>]')
     print("  anki audio '<query>'")
     print("  anki pdf '<query>'")
     print("  anki resync '<query>'")
-    print("  anki presets [preset]")
-    print("  anki draft [--append] [--print] [--stdin]")
+    print('  anki prune [--apply] [--anki]')
+    print('  anki presets [preset]')
+    print('  anki draft [--append] [--print] [--stdin]')
 
 
 def connect(url):
@@ -65,19 +73,62 @@ def connect(url):
     return client
 
 
+def parse_flags(rest, allowed, usage_line):
+    """Аргументи -> (позиційні, прапорці). Невідомий прапорець - помилка."""
+    positional = []
+    flags = set()
+    for item in rest:
+        if item in allowed:
+            flags.add(item)
+        elif item.startswith('--'):
+            print('Невідомий прапорець %s. %s' % (item, usage_line))
+            sys.exit(1)
+        else:
+            positional.append(item)
+    return positional, flags
+
+
+def parse_cards_args(rest):
+    """Аргументи режиму cards -> (позиційні, теги з --tag)."""
+    positional = []
+    tags = []
+    index = 0
+    while index < len(rest):
+        item = rest[index]
+        if item == '--tag':
+            index += 1
+            if index >= len(rest):
+                print('Після --tag потрібна назва тегу.')
+                sys.exit(1)
+            tags.append(rest[index])
+        elif item.startswith('-'):
+            print('Невідомий прапорець %s. Використання: anki cards <preset> [--tag <назва>]' % item)
+            sys.exit(1)
+        else:
+            positional.append(item)
+        index += 1
+    return positional, tags
+
+
+def require_query(rest, mode):
+    if len(rest) < 1:
+        print("Запит не вказано. Використання: anki %s '<query>'" % mode)
+        sys.exit(1)
+    return rest[0]
+
+
 def resolve_preset(rest):
     # Без аргументу список доступних пресетів, бо схема полів більше не одна на проєкт
     names = config.list_presets()
     if not names:
         path = config.create_template()
-        rel = os.path.relpath(path)
-        print(f'Створено {rel}. Пресет потрібно заповнити і запустити скрипт повторно.')
+        print(f'Створено {path}. Пресет потрібно заповнити і запустити скрипт повторно.')
         sys.exit(0)
     if len(rest) < 1:
         print('Пресет не вказано. Доступні:')
         for name in names:
             print(f'  {name}')
-        print(f'\nЗапуск: anki-tts-filler cards {names[0]}')
+        print(f'\nЗапуск: anki cards {names[0]}')
         sys.exit(1)
     if rest[0] not in names:
         print(f'Пресет "{rest[0]}" не знайдено. Доступні: {", ".join(names)}')
@@ -88,14 +139,14 @@ def resolve_preset(rest):
 def read_cards(input_path):
     if not os.path.isfile(input_path):
         open(input_path, 'w').close()
-        print(f'Створено {config.INPUT_FILE}. Картки потрібно вставити і запустити скрипт повторно.')
+        print(f'Створено {input_path}. Картки потрібно вставити і запустити скрипт повторно.')
         sys.exit(0)
 
     with open(input_path, encoding='utf-8') as f:
         text = f.read()
 
     if not text.strip():
-        print(f'{config.INPUT_FILE} порожній. Картки потрібно вставити і запустити скрипт повторно.')
+        print(f'{input_path} порожній. Картки потрібно вставити і запустити скрипт повторно.')
         sys.exit(0)
 
     if text.strip() in config.ERROR_LINES:
@@ -106,41 +157,25 @@ def read_cards(input_path):
 
 
 def load_settings_or_exit():
-    # Налаштування спільні для обох режимів, тому й створюються однаково
+    # Налаштування спільні для всіх режимів, тому й створюються однаково.
+    # Шлях абсолютний: файл читається з директорії запуску, і без повного
+    # шляху не видно, що запуск не з того каталогу створив ще один шаблон
     if not os.path.exists(config.SETTINGS_FILE):
         config.write_settings_template()
-        print(f'Створено {config.SETTINGS_FILE}. Налаштування потрібно перевірити і запустити скрипт повторно.')
+        print(f'Створено {os.path.abspath(config.SETTINGS_FILE)}. Налаштування потрібно перевірити і запустити скрипт повторно.')
         sys.exit(0)
     return config.load_settings()
 
 
-def build_audio_map(valid, preset, cache_dir, client, settings):
+def card_texts(valid, preset):
+    """Тексти всіх полів, з яких треба згенерувати аудіо для нових карток."""
     texts = set()
-    for _, card in valid:
+    for _, card, _ in valid:
         for src in set(preset.cards.values()):
             text = strip_html(card.get(src, ''))
             if text:
                 texts.add(text)
-    audio_map = generate(
-        texts,
-        cache_dir,
-        settings.voice.no,
-        settings.voice.rate_no,
-        settings.voice.volume_no,
-        settings.concurrency,
-    )
-
-    # Уже наявні в медіатеці Anki файли повторно не заливаються
-    existing = set(client.call('getMediaFilesNames', pattern=media_pattern()))
-    for path in audio_map.values():
-        name = os.path.basename(path)
-        if name in existing:
-            continue
-        with open(path, 'rb') as f:
-            data = base64.b64encode(f.read()).decode('ascii')
-        client.call('storeMediaFile', filename=name, data=data)
-
-    return audio_map
+    return texts
 
 
 def card_label(card, text_fields):
@@ -148,7 +183,8 @@ def card_label(card, text_fields):
 
 
 def main_cards(rest):
-    preset = resolve_preset(rest)
+    positional, cli_tags = parse_cards_args(rest)
+    preset = resolve_preset(positional)
     settings = load_settings_or_exit()
     client = connect(settings.anki_url)
 
@@ -182,26 +218,26 @@ def main_cards(rest):
 
     valid = []
     failed = 0
-    for i, (card, error) in enumerate(parsed, 1):
+    for i, (card, tags, error) in enumerate(parsed, 1):
         if error:
             print(f'Картка {i}: пропущено – {error}', file=sys.stderr)
             failed += 1
         else:
-            valid.append((i, card))
+            valid.append((i, card, tags))
 
     if not valid:
         print('Жодної валідної картки.')
         sys.exit(1)
 
     if preset.cards:
-        cache_dir = os.path.join(os.path.dirname(input_path), config.AUDIO_CACHE_DIR)
+        cache_dir = cache_path()
         os.makedirs(cache_dir, exist_ok=True)
-        audio_map = build_audio_map(valid, preset, cache_dir, client, settings)
+        audio_map = sync_media(card_texts(valid, preset), cache_dir, client, settings)
     else:
         audio_map = {}
 
     notes = []
-    for _, card in valid:
+    for _, card, tags in valid:
         audio_tags = {}
         for audio_field, src in preset.cards.items():
             src_text = strip_html(card.get(src, ''))
@@ -210,7 +246,8 @@ def main_cards(rest):
             'deckName': preset.deck_name,
             'modelName': preset.model_name,
             'fields': build_fields(card, audio_tags),
-            'tags': [],
+            # Теги з --tag дістаються всім карткам запуску, з рядка "tags:" – своїй
+            'tags': sorted(set(cli_tags) | set(tags)),
         })
 
     # Дублікати й інші відмови визначаються до додавання, з причиною по кожній нотатці
@@ -225,7 +262,7 @@ def main_cards(rest):
     # хоча самі ноти додаються одним запитом у кінці
     lines = []
     to_add = []
-    for (i, card), note, check in zip(valid, notes, checks):
+    for (i, card, _), note, check in zip(valid, notes, checks):
         label = card_label(card, text_fields)
         if not check['canAdd']:
             reason = check.get('error', 'нотатку не можна додати')
@@ -258,14 +295,14 @@ def main_cards(rest):
     for message, stream in lines:
         print(message, file=stream)
 
+    all_tags = sorted(set(cli_tags) | {tag for _, _, tags in valid for tag in tags})
+    if all_tags:
+        print('теги: %s' % ', '.join(all_tags))
     print(f'\nСтворено: {ok} | Вже існували: {duplicate} | Пропущено: {failed}')
 
 
 def main_audio(rest):
-    if len(rest) < 1:
-        print("Запит не вказано. Використання: anki-tts-filler audio '<query>'")
-        sys.exit(1)
-    query = rest[0]
+    query = require_query(rest, 'audio')
 
     # Налаштування читаються до підключення: адреса AnkiConnect береться з них
     settings = load_settings_or_exit()
@@ -277,34 +314,6 @@ def main_audio(rest):
 
 
 DRAFT_FLAGS = ('--print', '--append', '--stdin')
-DRAFT_OPTIONS = ()
-
-
-def parse_draft_args(rest):
-    name = None
-    flags = set()
-    options = {}
-    index = 0
-    while index < len(rest):
-        item = rest[index]
-        if item in DRAFT_FLAGS:
-            flags.add(item)
-        elif item in DRAFT_OPTIONS:
-            index += 1
-            if index >= len(rest):
-                print(f'Після {item} потрібне значення.')
-                sys.exit(1)
-            options[item] = rest[index]
-        elif item.startswith('-'):
-            print(f'Невідомий прапорець {item}.')
-            sys.exit(1)
-        elif name is None:
-            name = item
-        else:
-            print(f'Зайвий аргумент {item}.')
-            sys.exit(1)
-        index += 1
-    return name, flags, options
 
 
 def read_draft(use_stdin):
@@ -319,13 +328,13 @@ def read_draft(use_stdin):
     path = os.path.abspath(config.DRAFT_FILE)
     if not os.path.isfile(path):
         open(path, 'w').close()
-        print(f'Створено {config.DRAFT_FILE}. Список потрібно вставити і запустити скрипт повторно.')
+        print(f'Створено {path}. Список потрібно вставити і запустити скрипт повторно.')
         sys.exit(0)
 
     with open(path, encoding='utf-8') as handle:
         raw = handle.read()
     if not raw.strip():
-        print(f'{config.DRAFT_FILE} порожній. Список потрібно вставити і запустити скрипт повторно.')
+        print(f'{path} порожній. Список потрібно вставити і запустити скрипт повторно.')
         sys.exit(0)
     return raw
 
@@ -342,7 +351,13 @@ def write_draft(path, body, append):
 
 
 def main_draft(rest):
-    name, flags, options = parse_draft_args(rest)
+    positional, flags = parse_flags(
+        rest, DRAFT_FLAGS, 'Використання: anki draft [--append] [--print] [--stdin]',
+    )
+    if len(positional) > 1:
+        print('Зайвий аргумент %s.' % positional[1])
+        sys.exit(1)
+    name = positional[0] if positional else None
     # Режим прив'язаний до ordforrad: назви полів у draft.py - конкретні поля
     # цього нотетайпу, для іншого вони були б просто неправдою
     if name is not None and name != draft.PRESET_NAME:
@@ -352,16 +367,8 @@ def main_draft(rest):
         print(f'Пресет {draft.PRESET_NAME} не знайдено в presets/.')
         sys.exit(1)
 
-    preset = config.load_preset(draft.PRESET_NAME)
-    settings = load_settings_or_exit()
-    client = connect(settings.anki_url)
-
-    model_fields = client.call('modelFieldNames', modelName=preset.model_name)
-    unknown = [name for name in draft.FIELDS if name not in model_fields]
-    if unknown:
-        print(f'Нотетайп {preset.model_name} не має полів: {", ".join(unknown)}')
-        sys.exit(1)
-
+    # Anki тут не потрібен: режим лише переписує текстовий файл, а назви
+    # полів усе одно звіряються з нотетайпом при запуску cards
     raw = read_draft('--stdin' in flags)
     cards, problems = draft.generate(raw)
 
@@ -381,7 +388,7 @@ def main_draft(rest):
     replaced = '--append' not in flags and os.path.exists(path) and os.path.getsize(path) > 0
     write_draft(path, body, '--append' in flags)
     print(
-        f'{"перезаписано" if replaced else "записано"} в {config.INPUT_FILE}',
+        f'{"перезаписано" if replaced else "записано"} в {path}',
         file=sys.stderr,
     )
 
@@ -426,10 +433,7 @@ def main_presets(rest):
 
 
 def main_resync(rest):
-    if len(rest) < 1:
-        print("Запит не вказано. Використання: anki-tts-filler resync '<query>'")
-        sys.exit(1)
-    query = rest[0]
+    query = require_query(rest, 'resync')
 
     settings = load_settings_or_exit()
     client = connect(settings.anki_url)
@@ -438,27 +442,40 @@ def main_resync(rest):
         sys.exit(1)
 
 
-def main_pdf(rest):
-    if len(rest) < 1:
-        print("Запит не вказано. Використання: anki-tts-filler pdf '<query>'")
+def main_prune(rest):
+    positional, flags = parse_flags(
+        rest, ('--apply', '--anki'), 'Використання: anki prune [--apply] [--anki]',
+    )
+    if positional:
+        print('Зайвий аргумент %s.' % positional[0])
         sys.exit(1)
 
     settings = load_settings_or_exit()
     client = connect(settings.anki_url)
 
-    if not pdf_build.run(rest[0], settings, client):
+    if not prune.run(settings, client, '--apply' in flags, '--anki' in flags):
+        sys.exit(1)
+
+
+def main_pdf(rest):
+    query = require_query(rest, 'pdf')
+
+    settings = load_settings_or_exit()
+    client = connect(settings.anki_url)
+
+    if not pdf_build.run(query, settings, client):
         sys.exit(1)
 
 
 def main():
-    if len(sys.argv) < 2 or sys.argv[1] not in ('cards', 'audio', 'pdf', 'resync', 'presets', 'draft'):
+    if len(sys.argv) < 2 or sys.argv[1] not in MODES:
         usage()
         return 1
 
     mode = sys.argv[1]
     rest = sys.argv[2:]
-    # Очікувані відмови (помилка в settings.toml, немає ffmpeg, збій edge-tts,
-    # обрив звʼязку з Anki) друкуються рядком, а не трейсбеком
+    # Очікувані відмови (помилка в settings.toml або пресеті, немає ffmpeg,
+    # збій edge-tts, обрив звʼязку з Anki) друкуються рядком, а не трейсбеком
     try:
         if mode == 'cards':
             main_cards(rest)
@@ -468,11 +485,13 @@ def main():
             main_pdf(rest)
         elif mode == 'resync':
             main_resync(rest)
+        elif mode == 'prune':
+            main_prune(rest)
         elif mode == 'presets':
             main_presets(rest)
         else:
             main_draft(rest)
-    except (SettingsError, AnkiConnectError, AudioError, PdfError, ResyncError, TtsError) as exc:
+    except (SettingsError, AnkiConnectError, AudioError, PdfError, PruneError, ResyncError, TtsError) as exc:
         print('помилка: %s' % exc, file=sys.stderr)
         return 1
     except KeyboardInterrupt:
