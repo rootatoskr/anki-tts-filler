@@ -9,16 +9,11 @@ import asyncio
 import base64
 import hashlib
 import os
-import re
 import shutil
 import subprocess
 
 from .config import AUDIO_CACHE_DIR, MEDIA_PREFIX
 from .tts_cache import TtsCache
-
-
-def strip_html(text):
-    return re.sub(r'<[^>]+>', '', text).strip()
 
 
 def sound_tag(path):
@@ -56,15 +51,38 @@ def _trim_silence(path):
     os.replace(tmp, path)
 
 
+def media_file_name(text, voice, rate, volume):
+    """Імʼя mp3 для цього тексту - єдине місце, де воно обчислюється.
+
+    Чиста функція, тому режим resync може заздалегідь порахувати, які поля
+    справді зміняться, і озвучити лише їх.
+    """
+    # Нейтральна гучність у ключ не входить: інакше всі вже залиті в Anki
+    # langdeck_* файли перегенерувалися б і продублювалися в медіатеці.
+    parts = [text, voice, rate] if volume == '+0%' else [text, voice, rate, volume]
+    digest = hashlib.md5('|'.join(parts).encode()).hexdigest()[:16]
+    return MEDIA_PREFIX + digest + '.mp3'
+
+
+def media_path(text, cache_dir, voice, rate, volume):
+    return os.path.join(cache_dir, media_file_name(text, voice, rate, volume))
+
+
+def expected_tag(text, settings):
+    """[sound:...], який має стояти в аудіополі для цього тексту.
+
+    Каталог тут не потрібен: у тег іде лише імʼя файлу.
+    """
+    return sound_tag(media_file_name(
+        text, settings.voice.target, settings.voice.rate_target, settings.voice.volume_target,
+    ))
+
+
 class MediaCache(TtsCache):
     """Кеш режиму cards: імена як у медіатеці Anki, з обрізанням тиші."""
 
     def path_for(self, text, voice, rate, volume):
-        # Нейтральна гучність у ключ не входить: інакше всі вже залиті в Anki
-        # langdeck_* файли перегенерувалися б і продублювалися в медіатеці.
-        parts = [text, voice, rate] if volume == '+0%' else [text, voice, rate, volume]
-        digest = hashlib.md5('|'.join(parts).encode()).hexdigest()[:16]
-        return os.path.join(self.cache_dir, MEDIA_PREFIX + digest + '.mp3')
+        return media_path(text, self.cache_dir, voice, rate, volume)
 
     def postprocess(self, path):
         _trim_silence(path)
