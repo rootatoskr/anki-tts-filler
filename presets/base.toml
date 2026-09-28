@@ -1,4 +1,4 @@
-deck_name = "language-no::no-ordforråd"
+deck_name = "language-no::no-base"
 model_name = "type-language-no-basic"
 
 [cards]
