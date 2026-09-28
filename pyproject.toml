@@ -3,7 +3,7 @@ name = "anki-tts-filler"
 version = "0.1.0"
 description = "Заповнення нотаток в Anki через AnkiConnect з TTS-аудіо"
 readme = "README.md"
-requires-python = ">=3.14"
+requires-python = ">=3.11"
 dependencies = [
     "edge-tts>=7.2.8",
 ]
@@ -18,3 +18,24 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/anki_tts_filler"]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.14",
+]
+
+[tool.ruff]
+line-length = 200
+target-version = "py311"
+
+[tool.ruff.lint]
+# E/W - pycodestyle, F - pyflakes. E221 (пробіли перед оператором) і E241
+# (пробіли після коми) - це і є заборона вирівнювання по стовпцях; у ruff
+# вони живуть у preview, тому preview = true обов'язковий, інакше правила
+# просто не запускаються. Форматер ruff не вживається: він переписав би
+# наявний стиль цілком.
+preview = true
+select = ["E", "W", "F"]
+# E501 не вживається: line-length виставлено формально, довжину рядків
+# контролює не лінтер
+ignore = ["E501"]
