@@ -488,27 +488,6 @@ def _parse_sections(schema, preset_name):
     )
 
 
-def field_roles(preset):
-    """Поле нотетайпу -> ролі, які йому дає пресет.
-
-    Звіряння з Anki ловить назву, якої нема в нотетайпі, але не зворотне:
-    поле, яке існує, а в пресеті не згадане, просто ніде не зʼявиться.
-    """
-    roles = {}
-    for audio_field, text_field in preset.cards.items():
-        roles.setdefault(text_field, []).append('cards')
-        roles.setdefault(audio_field, []).append('cards:аудіо')
-    for text_field in preset.audio_target:
-        roles.setdefault(text_field, []).append('audio:target')
-    for text_field in preset.audio_native:
-        roles.setdefault(text_field, []).append('audio:native')
-    if preset.audio_examples:
-        roles.setdefault(preset.audio_examples, []).append('audio:examples')
-    for text_field in preset.pdf_fields:
-        roles.setdefault(text_field, []).append('pdf')
-    return roles
-
-
 def orders(presets, mode):
     """Тип ноти -> порядок, заданий пресетом для цього режиму."""
     return {preset.model_name: preset.order_for(mode) for preset in presets}

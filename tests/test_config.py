@@ -139,27 +139,6 @@ fields = ["one", "note"]
         self.write('zzz', 'deck_name = "D"\nmodel_name = "Z"\n')
         self.assertEqual([p.model_name for p in config.load_all_presets()], ['A', 'Z'])
 
-    def test_field_roles(self):
-        self.write('r', '''deck_name = "D"
-model_name = "M"
-
-[cards]
-audio_one = "one"
-
-[audio]
-target = ["one"]
-native = ["uk"]
-examples = "note"
-
-[pdf]
-fields = ["one"]
-''')
-        roles = config.field_roles(config.load_preset('r'))
-        self.assertEqual(roles['one'], ['cards', 'audio:target', 'pdf'])
-        self.assertEqual(roles['audio_one'], ['cards:аудіо'])
-        self.assertEqual(roles['uk'], ['audio:native'])
-        self.assertEqual(roles['note'], ['audio:examples'])
-
 
 class SettingsTest(unittest.TestCase):
     def load(self, body):
