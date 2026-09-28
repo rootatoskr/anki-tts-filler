@@ -26,9 +26,11 @@ settings.toml. Конкретних мов у коді немає: сторон�
 Режим pdf: та сама вибірка, що й audio, але на друк - кожне поле картки
 окремим рядком.
 
-Режим resync: query - той самий Anki-запит, що й у audio/pdf. Аудіополя з
-[cards] пресету переозвучуються за поточним текстом відповідних полів уже
-існуючих нот - для картки, яку відредагували вручну після створення.
+Режим resync: аргумент - назва пресету (усі ноти його нотетайпу) або той
+самий Anki-запит, що й у audio/pdf; без аргументу друкується перелік
+пресетів. Аудіополя з [cards] пресету переозвучуються за поточним текстом
+відповідних полів уже існуючих нот - для картки, яку відредагували вручну
+після створення. Від resync.confirm_from нот питає підтвердження.
 
 Режим prune: згенеровані mp3, на які вже не посилається жодна нота. Типово
 лише звіт, видалення - з --apply.
@@ -40,7 +42,8 @@ import os
 
 from . import config, audio_build, draft, pdf_build, prune, resync
 from .parser import split_cards, build_fields
-from .audio import cache_path, strip_html, sound_tag, ffmpeg_available, sync_media
+from .audio import cache_path, sound_tag, ffmpeg_available, sync_media
+from .note_cards import clean_text
 from .ankiconnect import AnkiConnect, AnkiConnectError
 from .audio_build import AudioError
 from .pdf_build import PdfError
@@ -57,7 +60,7 @@ def usage():
     print('  anki cards <preset> [--tag <назва>]')
     print("  anki audio '<query>'")
     print("  anki pdf '<query>'")
-    print("  anki resync '<query>'")
+    print("  anki resync <preset> | '<query>'")
     print('  anki prune [--apply] [--anki]')
     print('  anki presets [preset]')
     print('  anki draft [--append] [--print] [--stdin]')
@@ -172,7 +175,7 @@ def card_texts(valid, preset):
     texts = set()
     for _, card, _ in valid:
         for src in set(preset.cards.values()):
-            text = strip_html(card.get(src, ''))
+            text = clean_text(card.get(src, ''))
             if text:
                 texts.add(text)
     return texts
@@ -240,7 +243,7 @@ def main_cards(rest):
     for _, card, tags in valid:
         audio_tags = {}
         for audio_field, src in preset.cards.items():
-            src_text = strip_html(card.get(src, ''))
+            src_text = clean_text(card.get(src, ''))
             audio_tags[audio_field] = sound_tag(audio_map[src_text]) if src_text else ''
         notes.append({
             'deckName': preset.deck_name,
@@ -358,7 +361,7 @@ def main_draft(rest):
         print('Зайвий аргумент %s.' % positional[1])
         sys.exit(1)
     name = positional[0] if positional else None
-    # Режим прив'язаний до ordforrad: назви полів у draft.py - конкретні поля
+    # Режим прив'язаний до base: назви полів у draft.py - конкретні поля
     # цього нотетайпу, для іншого вони були б просто неправдою
     if name is not None and name != draft.PRESET_NAME:
         print(f'draft працює тільки з пресетом {draft.PRESET_NAME}, а не "{name}".')
@@ -432,8 +435,30 @@ def main_presets(rest):
             print(f'  у пресеті є, а в нотетайпі немає: {", ".join(sorted(roles))}')
 
 
+def resolve_target(rest):
+    """Аргумент режиму resync: назва пресету або Anki-запит.
+
+    Без аргументу друкується перелік пресетів - так само, як це робить cards
+    з назвою пресету.
+    """
+    if rest:
+        return rest[0]
+
+    names = config.list_presets()
+    if not names:
+        path = config.create_template()
+        print(f'Створено {path}. Пресет потрібно заповнити і запустити скрипт повторно.')
+        sys.exit(0)
+    print('Ціль не вказано. Доступні пресети:')
+    for name in names:
+        print(f'  {name}')
+    print(f'\nЗапуск: anki resync {names[0]}')
+    print("Або Anki-запит: anki resync 'nid:1234567890'")
+    sys.exit(1)
+
+
 def main_resync(rest):
-    query = require_query(rest, 'resync')
+    query = resolve_target(rest)
 
     settings = load_settings_or_exit()
     client = connect(settings.anki_url)
