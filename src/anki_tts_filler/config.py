@@ -89,7 +89,10 @@ code = "no"
 # "en bok" стає на "b", "å lese" на "l"
 sort_prefixes = ["å ", "en ", "ei ", "et ", "den ", "det "]
 # Літери, які в абетці цільової мови йдуть після "z" - у тому ж порядку,
-# що й у самій абетці
+# що й у самій абетці. Працює лише для абеток на латиниці, що дописують
+# літери в кінець (норвезька æøå, шведська åäö): літера підставляється в
+# ключ сортування як "після z". Для абетки не на латиниці або для літери,
+# місце якої всередині (ґ після г), цей ключ не годиться.
 sort_extra_letters = ["æ", "ø", "å"]
 
 [gap]
@@ -108,6 +111,13 @@ between_cards = 1.5
 # target -> native -> target (repeat_target разів)
 repeat_target = 1
 use_anki_media = true
+
+[resync]
+# Від скількох нот режим resync питає підтвердження. Типовий випадок -
+# виправив одну картку і переозвучив її; більша кількість майже завжди
+# означає, що запит вийшов ширшим, ніж хотілося. Величезне число вимикає
+# запитання.
+confirm_from = 5
 
 [output]
 dir = "out"
@@ -144,7 +154,13 @@ class VoiceConfig:
 
 @dataclass
 class LanguageConfig:
-    """Те, що залежить від конкретної цільової мови, а не від схеми карток."""
+    """Те, що залежить від конкретної цільової мови, а не від схеми карток.
+
+    ``sort_extra_letters`` розраховане на абетки на латиниці, які дописують
+    літери в кінець: кожна така літера отримує ключ "після z". Абетку не на
+    латиниці цим не впорядкувати - там усі літери й так мають вищі коди, ніж
+    підставлений хвіст, тож перелічені опинилися б перед рештою.
+    """
 
     code: str = 'no'
     sort_prefixes: list = field(default_factory=lambda: ['å ', 'en ', 'ei ', 'et ', 'den ', 'det '])
@@ -169,6 +185,12 @@ class ContentConfig:
 
 
 @dataclass
+class ResyncConfig:
+    # Від скількох нот питати підтвердження перед записом
+    confirm_from: int = 5
+
+
+@dataclass
 class OutputConfig:
     dir: str = 'out'
     bitrate: str = '48k'
@@ -184,6 +206,7 @@ class Settings:
     language: LanguageConfig = field(default_factory=LanguageConfig)
     gap: GapConfig = field(default_factory=GapConfig)
     content: ContentConfig = field(default_factory=ContentConfig)
+    resync: ResyncConfig = field(default_factory=ResyncConfig)
     output: OutputConfig = field(default_factory=OutputConfig)
 
 
@@ -257,12 +280,15 @@ def load_settings(path=None):
         raise SettingsError('content.repeat_target має бути >= 0')
     if settings.concurrency < 1:
         raise SettingsError('concurrency має бути >= 1')
+    if settings.resync.confirm_from < 1:
+        raise SettingsError('resync.confirm_from має бути >= 1')
     # Відʼємна пауза для ffmpeg - помилка, нульова означає "без паузи"
     for name in ('after_target', 'after_native', 'within_side', 'between_repeats', 'between_cards'):
         if getattr(settings.gap, name) < 0:
             raise SettingsError('gap.%s не може бути відʼємним' % name)
 
     return settings
+
 
 # markdown-екранування "\_" ламає TOML-парсинг рядків виду key = "value", тому знімається ще до tomllib.loads
 _ESCAPED_VALUE_RE = re.compile(r'(?m)^(\w+\s*=\s*")(.*)(")$')
@@ -539,4 +565,22 @@ def load_preset(name):
 
 
 def load_all_presets():
-    return [load_preset(name) for name in list_presets()]
+    """Усі пресети з presets/, з перевіркою на повтор нотетайпу.
+
+    Режими audio, pdf і resync зіставляють пресет із нотою саме за
+    model_name, тож два пресети на один нотетайп - це не два варіанти на
+    вибір, а тихе затирання одного одним. Найпростіший шлях до цього -
+    скопіювати пресет як основу для нового й забути змінити model_name.
+    """
+    presets = [load_preset(name) for name in list_presets()]
+    owners = {}
+    for preset in presets:
+        first = owners.get(preset.model_name)
+        if first is not None:
+            raise PresetError(
+                'presets/%s.toml і presets/%s.toml заявляють той самий нотетайп %s; '
+                'режими audio, pdf і resync зіставляють пресети за model_name, '
+                'тож він має бути різний' % (first, preset.name, preset.model_name)
+            )
+        owners[preset.model_name] = preset.name
+    return presets
