@@ -5,8 +5,9 @@
 Поділу на сторони target і native тут нема - поля йдуть підряд, у тому
 порядку, в якому записані в пресеті.
 
-HTML тут не проміжний формат, а джерело: у PDF його переганяє headless Chrome,
-щоб не тягнути в проєкт залежність заради друку.
+HTML тут проміжний формат: у PDF його переганяє headless Chrome, щоб не тягнути
+в проєкт залежність заради друку, після чого HTML видаляється. Лишається він
+тільки тоді, коли Chrome не знайдено.
 """
 
 import html
@@ -190,7 +191,12 @@ def run(query, settings, client):
     with open(html_path, 'w', encoding='utf-8') as handle:
         handle.write(render(cards, query, settings.language.code))
 
-    out_path = to_pdf(chrome, html_path, os.path.join(settings.work_dir, 'chrome')) if chrome else html_path
+    if chrome:
+        out_path = to_pdf(chrome, html_path, os.path.join(settings.work_dir, 'chrome'))
+        # HTML свою роль відіграв: далі потрібен тільки PDF
+        os.remove(html_path)
+    else:
+        out_path = html_path
     print('карток: %d' % len(cards))
     print(out_path)
     if chrome is None:
