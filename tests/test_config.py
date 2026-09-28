@@ -50,6 +50,17 @@ fields = ["one", "translation"]
         self.assertEqual(preset.pdf_order, config.ORDER_SORTED)
         self.assertEqual(preset.media_fields(), {'one': 'audio_one'})
 
+    def test_template_is_valid(self):
+        # create_template() пише цей текст користувачеві як зразок: якщо він
+        # не парситься, перший же запуск падає на щойно створеному файлі
+        self.write('example', config.PRESET_TEMPLATE)
+        preset = config.load_preset('example')
+        self.assertEqual(preset.model_name, 'MyNoteType')
+        self.assertEqual(preset.cards, {'audio_field_one': 'field_one'})
+        self.assertEqual(preset.audio_target, ['field_one'])
+        self.assertEqual(preset.audio_native, ['field_translation'])
+        self.assertEqual(preset.pdf_order, config.ORDER_SORTED)
+
     def test_missing_deck_name_is_preset_error(self):
         self.write('bad', 'model_name = "M"\n')
         with self.assertRaises(config.PresetError) as caught:
@@ -111,6 +122,22 @@ fields = ["one", "note"]
         self.assertEqual(preset.mode_fields('audio'), {'one', 'uk', 'audio_one'})
         self.assertEqual(config.missing_fields(preset, ['one', 'uk'], 'audio'), ['audio_one'])
         self.assertEqual(config.missing_fields(preset, ['one', 'uk', 'audio_one'], 'audio'), [])
+
+    def test_duplicate_model_name_rejected(self):
+        body = 'deck_name = "D"\nmodel_name = "SAME"\n\n[cards]\naudio = "%s"\n'
+        self.write('aaa', body % 'one')
+        self.write('zzz', body % 'two')
+        with self.assertRaises(config.PresetError) as caught:
+            config.load_all_presets()
+        message = str(caught.exception)
+        self.assertIn('aaa', message)
+        self.assertIn('zzz', message)
+        self.assertIn('SAME', message)
+
+    def test_distinct_model_names_pass(self):
+        self.write('aaa', 'deck_name = "D"\nmodel_name = "A"\n')
+        self.write('zzz', 'deck_name = "D"\nmodel_name = "Z"\n')
+        self.assertEqual([p.model_name for p in config.load_all_presets()], ['A', 'Z'])
 
     def test_field_roles(self):
         self.write('r', '''deck_name = "D"
