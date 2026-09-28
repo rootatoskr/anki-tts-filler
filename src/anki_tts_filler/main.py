@@ -32,27 +32,24 @@ settings.toml. Конкретних мов у коді немає: сторон�
 відповідних полів уже існуючих нот - для картки, яку відредагували вручну
 після створення. Від resync.confirm_from нот питає підтвердження.
 
-Режим prune: згенеровані mp3, на які вже не посилається жодна нота. Типово
-лише звіт, видалення - з --apply.
 """
 
 import asyncio
 import sys
 import os
 
-from . import config, audio_build, draft, pdf_build, prune, resync
+from . import config, audio_build, draft, pdf_build, resync
 from .parser import split_cards, build_fields
 from .audio import cache_path, sound_tag, ffmpeg_available, sync_media
 from .note_cards import clean_text
 from .ankiconnect import AnkiConnect, AnkiConnectError
 from .audio_build import AudioError
 from .pdf_build import PdfError
-from .prune import PruneError
 from .resync import ResyncError
 from .config import SettingsError
 from .tts_cache import TtsError
 
-MODES = ('cards', 'audio', 'pdf', 'resync', 'prune', 'presets', 'draft')
+MODES = ('cards', 'audio', 'pdf', 'resync', 'draft')
 
 
 def usage():
@@ -61,8 +58,6 @@ def usage():
     print("  anki audio '<query>'")
     print("  anki pdf '<query>'")
     print("  anki resync <preset> | '<query>'")
-    print('  anki prune [--apply] [--anki]')
-    print('  anki presets [preset]')
     print('  anki draft [--append] [--print] [--stdin]')
 
 
@@ -396,45 +391,6 @@ def main_draft(rest):
     )
 
 
-def main_presets(rest):
-    """Друкує, яку роль кожне поле нотетайпу має в пресеті.
-
-    Показує і те, чого не ловить звіряння при запуску: поле нотетайпу, яке в
-    пресеті не згадане ніде, тобто ніколи не прозвучить і не надрукується.
-    """
-    names = config.list_presets()
-    if rest:
-        if rest[0] not in names:
-            print(f'Пресет "{rest[0]}" не знайдено. Доступні: {", ".join(names)}')
-            sys.exit(1)
-        names = [rest[0]]
-
-    settings = load_settings_or_exit()
-    client = connect(settings.anki_url)
-
-    for name in names:
-        preset = config.load_preset(name)
-        print(f'\n{name} ({preset.model_name}, audio: {preset.audio_order}, pdf: {preset.pdf_order})')
-        try:
-            model_fields = client.call('modelFieldNames', modelName=preset.model_name)
-        except AnkiConnectError as exc:
-            print(f'  нотетайпу немає в Anki: {exc}')
-            continue
-
-        roles = config.field_roles(preset)
-        unused = []
-        for field_name in model_fields:
-            used = roles.pop(field_name, [])
-            if used:
-                print(f'  {field_name} – {", ".join(used)}')
-            else:
-                unused.append(field_name)
-        if unused:
-            print(f'  ніде не згадані: {", ".join(unused)}')
-        if roles:
-            print(f'  у пресеті є, а в нотетайпі немає: {", ".join(sorted(roles))}')
-
-
 def resolve_target(rest):
     """Аргумент режиму resync: назва пресету або Anki-запит.
 
@@ -467,21 +423,6 @@ def main_resync(rest):
         sys.exit(1)
 
 
-def main_prune(rest):
-    positional, flags = parse_flags(
-        rest, ('--apply', '--anki'), 'Використання: anki prune [--apply] [--anki]',
-    )
-    if positional:
-        print('Зайвий аргумент %s.' % positional[0])
-        sys.exit(1)
-
-    settings = load_settings_or_exit()
-    client = connect(settings.anki_url)
-
-    if not prune.run(settings, client, '--apply' in flags, '--anki' in flags):
-        sys.exit(1)
-
-
 def main_pdf(rest):
     query = require_query(rest, 'pdf')
 
@@ -510,13 +451,9 @@ def main():
             main_pdf(rest)
         elif mode == 'resync':
             main_resync(rest)
-        elif mode == 'prune':
-            main_prune(rest)
-        elif mode == 'presets':
-            main_presets(rest)
         else:
             main_draft(rest)
-    except (SettingsError, AnkiConnectError, AudioError, PdfError, PruneError, ResyncError, TtsError) as exc:
+    except (SettingsError, AnkiConnectError, AudioError, PdfError, ResyncError, TtsError) as exc:
         print('помилка: %s' % exc, file=sys.stderr)
         return 1
     except KeyboardInterrupt:
