@@ -1,19 +1,26 @@
-# type-language-no-cloze зараз не має жодної ноти в колекції (перевірено
-# через AnkiConnect findCards) - deck_name невідомий, задай перед тим, як
+# Нот цього типу в колекції ще немає (перевірено через AnkiConnect findNotes),
+# тому deck_name лишається заглушкою - його треба задати перед тим, як
 # створювати картки цим пресетом. Режимам audio і pdf deck_name не потрібен.
 deck_name = "MyDeck::MySubdeck"
 model_name = "type-language-no-cloze"
 
+# Ролі полів узяті з шаблону нотетайпу: front це {{lc:cloze:production}}, тобто
+# клоуз стоїть в українському реченні (клас text-ua), а норвезьке речення
+# лежить у recognition (клас text-no). Пара example_1/translation_1 - приклад
+# no/uk, audio озвучує recognition, audio_1 - example_1.
 [cards]
+audio = "recognition"
 audio_1 = "example_1"
 
 [audio]
 # "linear" - як у Anki, "random" - для фонового слухання, "sorted" - за абеткою
 order = "linear"
-target = ["example_1"]
-native = ["translation_1"]
+# production містить {{c1::...}} - clean_text розгортає клоуз, тож у доріжку
+# йде повне речення без розмітки
+target = ["recognition"]
+native = ["production"]
 
 [pdf]
 # шпаргалку зручніше читати за абеткою першого рядка
 order = "sorted"
-fields = ["title", "example_1", "translation_1", "note"]
+fields = ["title", "recognition", "production", "example_1", "translation_1", "note"]
