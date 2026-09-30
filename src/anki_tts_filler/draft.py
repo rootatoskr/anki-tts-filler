@@ -1,9 +1,9 @@
 """Чернетка cards.txt зі списку "норвезька + українська в одному рядку".
 
-Ніякого форматування змісту: recognition/production - точно та частина
-рядка, що лишилась після відсічення роздільників, буква в букву. Єдині дві
-механічні правки - тире стає en dash (з пробілом з обох боків) і дужки, якщо
-рядок має рівно одну пару дужок, ідуть у note.
+Зміст беруть як є, з чотирьох механічних правок: перша літера кожного речення
+стає малою (у note регістр не чіпається), крапка в кінці значення знімається,
+тире стає en dash (з пробілом з обох боків), а те, що взяте в подвійні дужки,
+іде в note.
 
 Розбір - по межі скриптів кирилиця/латиниця, тому працює миттєво й
 детерміновано, без ШІ. Режим навмисно вузький - тільки пресет base із
@@ -32,11 +32,20 @@ DASH_RE = re.compile(r'\s+[%s]\s*|\s*[%s]\s+' % (_DASHES, _DASHES))
 # Роздільник між мовами, що лишається зайвим "– " у кінці норвезької частини
 # після відсічення кирилиці (наприклад "en kunde – один клієнт")
 TRAILING_DASH_RE = re.compile(r'\s*–\s*$')
-# Одна пара дужок рівно в кінці рядка - решта тексту вже позаду
-PAREN_GROUP_RE = re.compile(r'\([^()]*\)')
-TRAILING_PAREN_RE = re.compile(r'\s*\(([^()]*)\)\s*$')
+# Ремарка для note позначається подвійними дужками, і місце в рядку значення
+# не має. Одинарні дужки лишаються частиною самого тексту картки
+# ("en kokk (et yrke)"), бо позначка тепер явна й угадувати нема чого
+DOUBLE_PAREN_RE = re.compile(r'\(\((.+?)\)\)')
 # Переклад цифрами замість кирилиці: "førti 40", "to tusen og ti 2010"
 TRAILING_NUMBER_RE = re.compile(r'\s+(\d[\d\s]*)$')
+# Крапка в кінці значення: у картці вона зайва. Знімається лише одинична - "..."
+# ставлять навмисно ("jeg heter ..."), а знак питання й оклику несуть зміст.
+# Крапки всередині не чіпаються, інакше два речення злиплися б в одне
+TRAILING_DOT_RE = re.compile(r'(?<!\.)\.$')
+# Початок речення: сам початок значення або після . ? ! з пробілом. З малої
+# робиться лише ця одна літера, тому власні назви в середині речення
+# ("jeg bor i Oslo") лишаються як були
+SENTENCE_START_RE = re.compile(r'(^|[.!?]\s+)(\w)')
 
 
 def collapse(text):
@@ -47,21 +56,49 @@ def normalize_dashes(text):
     return DASH_RE.sub(' – ', text)
 
 
+def strip_dot(text):
+    return TRAILING_DOT_RE.sub('', text).rstrip()
+
+
+def lower_sentences(text):
+    """З малої лише перша літера кожного речення, решта тексту без змін."""
+    return SENTENCE_START_RE.sub(lambda m: m.group(1) + m.group(2).lower(), text)
+
+
+def make_card(recognition, production, note_raw):
+    """Значення картки з уже поділених частин.
+
+    Регістр правиться тільки на початку речень і тільки в двох основних
+    полях: note - це ремарка з подвійних дужок, узята з рядка як є, і
+    зводити її регістр нема за чим.
+    """
+    card = {
+        SOURCE_FIELD: strip_dot(lower_sentences(recognition)),
+        TARGET_FIELD: strip_dot(lower_sentences(production)),
+    }
+    if note_raw is not None:
+        card[NOTE_FIELD] = strip_dot(note_raw)
+    return card
+
+
 def split_line(line):
     """Один рядок -> картка або (None, причина), якщо межу не знайдено.
 
-    Дужки йдуть у note, тільки коли в рядку рівно одна пара: дві й більше -
-    ознака, що це не окрема ремарка, а частина самого перекладу
-    ("en kokk (et yrke) кухар (професія)" лишається одним цілим).
+    У note іде вміст подвійних дужок, скільком би місцях вони не стояли;
+    кілька таких груп склеюються пробілом. Знімаються вони до поділу рядка,
+    бо ремарка зазвичай містить обидві мови і межу кирилиця/латиниця збила б.
     """
-    body = collapse(normalize_dashes(line))
+    # Кінцева крапка знімається тут, а не лише при збиранні картки: інакше
+    # вона впирається в регулярку хвоста рядка і "førti 40." не розпізнався б
+    # як числівник. Регістр тут не чіпаємо: він правиться по полях, бо note
+    # виняток
+    body = strip_dot(collapse(normalize_dashes(line)))
 
     note_raw = None
-    if len(PAREN_GROUP_RE.findall(body)) == 1:
-        match = TRAILING_PAREN_RE.search(body)
-        if match:
-            note_raw = match.group(1)
-            body = body[:match.start()].rstrip()
+    groups = DOUBLE_PAREN_RE.findall(body)
+    if groups:
+        note_raw = ' '.join(group.strip() for group in groups)
+        body = collapse(DOUBLE_PAREN_RE.sub(' ', body))
 
     cyr_match = CYRILLIC_CHAR_RE.search(body)
     if not cyr_match:
@@ -74,20 +111,14 @@ def split_line(line):
         recognition = body[:number.start()].strip()
         if not recognition:
             return None, 'немає латинської (норвезької) частини'
-        card = {SOURCE_FIELD: recognition, TARGET_FIELD: number.group(1).strip()}
-        if note_raw is not None:
-            card[NOTE_FIELD] = note_raw
-        return card, None
+        return make_card(recognition, number.group(1).strip(), note_raw), None
 
     recognition = TRAILING_DASH_RE.sub('', body[:cyr_match.start()].rstrip())
     production = body[cyr_match.start():].strip()
     if not recognition:
         return None, 'немає латинської (норвезької) частини'
 
-    card = {SOURCE_FIELD: recognition, TARGET_FIELD: production}
-    if note_raw is not None:
-        card[NOTE_FIELD] = note_raw
-    return card, None
+    return make_card(recognition, production, note_raw), None
 
 
 def generate(raw):
