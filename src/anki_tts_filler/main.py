@@ -26,6 +26,9 @@ settings.toml. Конкретних мов у коді немає: сторон�
 Режим pdf: та сама вибірка, що й audio, але на друк - кожне поле картки
 окремим рядком.
 
+Режим mirror: дублікати нот у нотетайп зворотного напрямку - пара полів із
+[mirror] пресету міняється місцями. Ціль задається так само, як у resync.
+
 Режим resync: аргумент - назва пресету (усі ноти його нотетайпу) або той
 самий Anki-запит, що й у audio/pdf; без аргументу друкується перелік
 пресетів. Аудіополя з [cards] пресету переозвучуються за поточним текстом
@@ -38,27 +41,40 @@ import asyncio
 import sys
 import os
 
-from . import config, audio_build, draft, pdf_build, resync
+from . import config, audio_build, draft, mirror, pdf_build, resync
 from .parser import split_cards, build_fields
 from .audio import cache_path, sound_tag, ffmpeg_available, sync_media
 from .note_cards import clean_text
 from .ankiconnect import AnkiConnect, AnkiConnectError
 from .audio_build import AudioError
+from .mirror import MirrorError
 from .pdf_build import PdfError
 from .resync import ResyncError
 from .config import SettingsError
 from .tts_cache import TtsError
 
-MODES = ('cards', 'audio', 'pdf', 'resync', 'draft')
+MODES = ('cards', 'audio', 'pdf', 'resync', 'mirror', 'draft')
 
 
 def usage():
     print('Використання:')
-    print('  anki cards <preset> [--tag <назва>]')
+    print('  anki cards <preset> [--tag <назва>]...')
     print("  anki audio '<query>'")
     print("  anki pdf '<query>'")
     print("  anki resync <preset> | '<query>'")
-    print('  anki draft [--append] [--print] [--stdin]')
+    print("  anki mirror <preset> | '<query>' [--tag <назва>]...")
+    print('  anki draft')
+    print()
+    print('Приклади:')
+    print('  anki cards base --tag no_fargene --tag kapittel_9')
+    print("  anki audio 'tag:no\\_fargene'")
+    print("  anki pdf 'deck:language-no::no-verb'")
+    print('  anki resync base')
+    print("  anki resync 'nid:1790316425552'")
+    print("  anki mirror 'tag:no\\_fargene' --tag mirrored")
+    print()
+    print("Запит: tag:no\\_fargene, deck:language-no::no-verb, nid:<id>, note:<notetype>")
+    print('Теги в cards.txt: рядок "tags: no_fargene kapittel_9" усередині картки')
 
 
 def connect(url):
@@ -69,21 +85,6 @@ def connect(url):
         print('Не вдалося підключитись до Anki (%s). Anki має бути відкритий з увімкненим аддоном AnkiConnect.' % url)
         sys.exit(1)
     return client
-
-
-def parse_flags(rest, allowed, usage_line):
-    """Аргументи -> (позиційні, прапорці). Невідомий прапорець - помилка."""
-    positional = []
-    flags = set()
-    for item in rest:
-        if item in allowed:
-            flags.add(item)
-        elif item.startswith('--'):
-            print('Невідомий прапорець %s. %s' % (item, usage_line))
-            sys.exit(1)
-        else:
-            positional.append(item)
-    return positional, flags
 
 
 def parse_cards_args(rest):
@@ -311,18 +312,8 @@ def main_audio(rest):
         sys.exit(1)
 
 
-DRAFT_FLAGS = ('--print', '--append', '--stdin')
-
-
-def read_draft(use_stdin):
-    """Сирий список: типово з draft.txt, при --stdin - із потоку."""
-    if use_stdin:
-        raw = sys.stdin.read()
-        if not raw.strip():
-            print('Порожній ввід.')
-            sys.exit(1)
-        return raw
-
+def read_draft():
+    """Сирий список із draft.txt."""
     path = os.path.abspath(config.DRAFT_FILE)
     if not os.path.isfile(path):
         open(path, 'w').close()
@@ -337,29 +328,9 @@ def read_draft(use_stdin):
     return raw
 
 
-def write_draft(path, body, append):
-    existing = ''
-    if os.path.exists(path):
-        with open(path, encoding='utf-8') as handle:
-            existing = handle.read()
-    with open(path, 'a' if append else 'w', encoding='utf-8') as handle:
-        if append and existing and not existing.endswith('\n\n'):
-            handle.write('\n' if existing.endswith('\n') else '\n\n')
-        handle.write(body)
-
-
 def main_draft(rest):
-    positional, flags = parse_flags(
-        rest, DRAFT_FLAGS, 'Використання: anki draft [--append] [--print] [--stdin]',
-    )
-    if len(positional) > 1:
-        print('Зайвий аргумент %s.' % positional[1])
-        sys.exit(1)
-    name = positional[0] if positional else None
-    # Режим прив'язаний до base: назви полів у draft.py - конкретні поля
-    # цього нотетайпу, для іншого вони були б просто неправдою
-    if name is not None and name != draft.PRESET_NAME:
-        print(f'draft працює тільки з пресетом {draft.PRESET_NAME}, а не "{name}".')
+    if rest:
+        print('anki draft не приймає аргументів.')
         sys.exit(1)
     if draft.PRESET_NAME not in config.list_presets():
         print(f'Пресет {draft.PRESET_NAME} не знайдено в presets/.')
@@ -367,7 +338,7 @@ def main_draft(rest):
 
     # Anki тут не потрібен: режим лише переписує текстовий файл, а назви
     # полів усе одно звіряються з нотетайпом при запуску cards
-    raw = read_draft('--stdin' in flags)
+    raw = read_draft()
     cards, problems = draft.generate(raw)
 
     lines = len([line for line in raw.splitlines() if line.strip()])
@@ -378,21 +349,18 @@ def main_draft(rest):
         print('деякі рядки не розібрались – нічого не записано', file=sys.stderr)
         sys.exit(1)
 
-    body = draft.format_cards(cards)
-    if '--print' in flags:
-        print(body, end='')
-        return
     path = os.path.abspath(config.INPUT_FILE)
-    replaced = '--append' not in flags and os.path.exists(path) and os.path.getsize(path) > 0
-    write_draft(path, body, '--append' in flags)
+    replaced = os.path.exists(path) and os.path.getsize(path) > 0
+    with open(path, 'w', encoding='utf-8') as handle:
+        handle.write(draft.format_cards(cards))
     print(
         f'{"перезаписано" if replaced else "записано"} в {path}',
         file=sys.stderr,
     )
 
 
-def resolve_target(rest):
-    """Аргумент режиму resync: назва пресету або Anki-запит.
+def resolve_target(rest, mode):
+    """Аргумент режимів resync і mirror: назва пресету або Anki-запит.
 
     Без аргументу друкується перелік пресетів - так само, як це робить cards
     з назвою пресету.
@@ -408,18 +376,29 @@ def resolve_target(rest):
     print('Ціль не вказано. Доступні пресети:')
     for name in names:
         print(f'  {name}')
-    print(f'\nЗапуск: anki resync {names[0]}')
-    print("Або Anki-запит: anki resync 'nid:1234567890'")
+    print(f'\nЗапуск: anki {mode} {names[0]}')
+    print(f"Або Anki-запит: anki {mode} 'nid:1234567890'")
     sys.exit(1)
 
 
 def main_resync(rest):
-    query = resolve_target(rest)
+    query = resolve_target(rest, 'resync')
 
     settings = load_settings_or_exit()
     client = connect(settings.anki_url)
 
     if not resync.run(query, settings, client):
+        sys.exit(1)
+
+
+def main_mirror(rest):
+    positional, cli_tags = parse_cards_args(rest)
+    query = resolve_target(positional, 'mirror')
+
+    settings = load_settings_or_exit()
+    client = connect(settings.anki_url)
+
+    if not mirror.run(query, settings, client, cli_tags):
         sys.exit(1)
 
 
@@ -451,9 +430,11 @@ def main():
             main_pdf(rest)
         elif mode == 'resync':
             main_resync(rest)
+        elif mode == 'mirror':
+            main_mirror(rest)
         else:
             main_draft(rest)
-    except (SettingsError, AnkiConnectError, AudioError, PdfError, ResyncError, TtsError) as exc:
+    except (SettingsError, AnkiConnectError, AudioError, MirrorError, PdfError, ResyncError, TtsError) as exc:
         print('помилка: %s' % exc, file=sys.stderr)
         return 1
     except KeyboardInterrupt:
