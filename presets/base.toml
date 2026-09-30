@@ -15,3 +15,10 @@ native = ["production"]
 # їх у грона за займенником ("Jeg ...", "Han ..."), а не за змістом
 order = "linear"
 fields = ["recognition", "production", "note"]
+
+# Режим mirror: дублікати цих нот у нотетайп зворотного напрямку.
+# production і recognition міняються місцями, тож на лицевому боці дубліката
+# опиняється норвезька, а не переклад.
+[mirror]
+preset = "base-rev"
+swap = ["production", "recognition"]

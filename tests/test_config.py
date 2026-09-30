@@ -123,6 +123,42 @@ fields = ["one", "note"]
         self.assertEqual(config.missing_fields(preset, ['one', 'uk'], 'audio'), ['audio_one'])
         self.assertEqual(config.missing_fields(preset, ['one', 'uk', 'audio_one'], 'audio'), [])
 
+    def test_mirror_section(self):
+        self.write('m', '''deck_name = "D"
+model_name = "M"
+
+[mirror]
+preset = "m-rev"
+swap = ["a", "b"]
+''')
+        preset = config.load_preset('m')
+        self.assertEqual(preset.mirror_preset, 'm-rev')
+        self.assertEqual(preset.mirror_swap, ['a', 'b'])
+        self.assertEqual(preset.mode_fields('mirror'), {'a', 'b'})
+
+    def test_no_mirror_section_means_empty(self):
+        self.write('m', 'deck_name = "D"\nmodel_name = "M"\n')
+        preset = config.load_preset('m')
+        self.assertEqual(preset.mirror_preset, '')
+        self.assertEqual(preset.mirror_swap, [])
+
+    def test_mirror_swap_must_be_a_pair(self):
+        for swap in ('["a"]', '["a", "b", "c"]', '["a", "a"]'):
+            self.write('m', 'deck_name = "D"\nmodel_name = "M"\n\n[mirror]\npreset = "r"\nswap = %s\n' % swap)
+            with self.assertRaises(config.PresetError, msg=swap):
+                config.load_preset('m')
+
+    def test_mirror_preset_required(self):
+        self.write('m', 'deck_name = "D"\nmodel_name = "M"\n\n[mirror]\nswap = ["a", "b"]\n')
+        with self.assertRaises(config.PresetError):
+            config.load_preset('m')
+
+    def test_unknown_mirror_key_rejected(self):
+        self.write('m', 'deck_name = "D"\nmodel_name = "M"\n\n[mirror]\npreset = "r"\nswap = ["a", "b"]\nwat = 1\n')
+        with self.assertRaises(config.PresetError) as caught:
+            config.load_preset('m')
+        self.assertIn('wat', str(caught.exception))
+
     def test_duplicate_model_name_rejected(self):
         body = 'deck_name = "D"\nmodel_name = "SAME"\n\n[cards]\naudio = "%s"\n'
         self.write('aaa', body % 'one')

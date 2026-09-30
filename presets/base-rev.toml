@@ -1,0 +1,20 @@
+# Приймач режиму mirror для пресету base: ті самі поля, але норвезька лежить
+# у production (лицевий бік), а переклад у recognition. Нотетайп і колоду
+# треба створити в Anki перед першим запуском mirror.
+deck_name = "language-no::no-base-rev"
+model_name = "type-language-no-basic-rev"
+
+# Аудіо тут генерується з production, бо саме там норвезький текст. Імʼя
+# файлу - відпечаток тексту, тому аудіо, скопійоване з вихідної ноти,
+# лишається актуальним і resync його не переписує.
+[cards]
+audio = "production"
+
+[audio]
+order = "linear"
+target = ["production"]
+native = ["recognition"]
+
+[pdf]
+order = "linear"
+fields = ["production", "recognition", "note"]

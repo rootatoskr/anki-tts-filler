@@ -62,6 +62,14 @@ examples = "note"
 [pdf]
 order = "sorted"
 fields = ["field_one", "field_translation", "note"]
+
+# Режим mirror: дублікати цих нот у нотетайп зворотного напрямку.
+# preset - пресет, куди писати (його deck_name і model_name мають існувати
+# в Anki). swap - рівно два поля, що міняються місцями. Секції немає - режим
+# цей тип ноти не обслуговує.
+# [mirror]
+# preset = "example-rev"
+# swap = ["field_one", "field_translation"]
 '''
 
 SETTINGS_TEMPLATE = '''# Налаштування усіх режимів. Режими cards і resync беруть звідси anki_url,
@@ -300,7 +308,7 @@ _DECK_PREFIX_RE = re.compile(r'^deck\s*:\s*')
 
 # Ключі верхнього рівня пресету і секції, які розбирає _parse_sections
 PRESET_KEYS = ('deck_name', 'model_name')
-PRESET_SECTIONS = ('cards', 'audio', 'pdf')
+PRESET_SECTIONS = ('cards', 'audio', 'pdf', 'mirror')
 
 # Перейменовані ключі пресетів: шлях старого -> новий
 RENAMED_PRESET_KEYS = {
@@ -314,7 +322,7 @@ class PresetError(SettingsError):
 
 
 class Preset:
-    def __init__(self, name, deck_name, model_name, cards, audio_target, audio_native, audio_examples, audio_order, pdf_fields, pdf_order):
+    def __init__(self, name, deck_name, model_name, cards, audio_target, audio_native, audio_examples, audio_order, pdf_fields, pdf_order, mirror_preset, mirror_swap):
         self.name = name
         self.deck_name = deck_name
         self.model_name = model_name
@@ -330,6 +338,9 @@ class Preset:
         # потребують різного - рандом проти стабільної абетки
         self.audio_order = audio_order
         self.pdf_order = pdf_order
+        # режим mirror: куди писати дублікати і яку пару полів переставити
+        self.mirror_preset = mirror_preset
+        self.mirror_swap = mirror_swap
 
     def order_for(self, mode):
         return self.audio_order if mode == 'audio' else self.pdf_order
@@ -348,6 +359,8 @@ class Preset:
             return set(self.cards) | set(self.cards.values())
         if mode == 'pdf':
             return set(self.pdf_fields)
+        if mode == 'mirror':
+            return set(self.mirror_swap)
         media = self.media_fields()
         used = set(self.audio_target) | set(self.audio_native)
         if self.audio_examples:
@@ -435,6 +448,27 @@ def _required_name(schema, key, preset_name):
     return value
 
 
+def _parse_mirror(section, preset_name):
+    """Секція [mirror] -> (назва пресету-приймача, пара полів).
+
+    Пара саме з двох полів: міняти місцями три й більше нема сенсу, а один
+    означав би, що переставляти нема чого.
+    """
+    if not section:
+        return '', []
+
+    target = section.get('preset')
+    if not isinstance(target, str) or not target:
+        raise PresetError('%s: mirror.preset має бути назвою пресету' % preset_name)
+
+    swap = _string_list(section.get('swap', []), 'mirror.swap', preset_name)
+    if len(swap) != 2:
+        raise PresetError('%s: mirror.swap має містити рівно два поля, а не %d' % (preset_name, len(swap)))
+    if swap[0] == swap[1]:
+        raise PresetError('%s: mirror.swap містить те саме поле двічі' % preset_name)
+    return target, swap
+
+
 def _parse_sections(schema, preset_name):
     """Пресет -> порядок карток і поля для cards, audio і pdf.
 
@@ -477,6 +511,10 @@ def _parse_sections(schema, preset_name):
     _unknown_preset_keys(pdf, ('fields', 'order'), 'pdf', preset_name)
     pdf_fields = _string_list(pdf.get('fields', []), 'pdf.fields', preset_name)
 
+    mirror = _section(schema, 'mirror', preset_name)
+    _unknown_preset_keys(mirror, ('preset', 'swap'), 'mirror', preset_name)
+    mirror_preset, mirror_swap = _parse_mirror(mirror, preset_name)
+
     return (
         cards,
         audio_target,
@@ -485,6 +523,8 @@ def _parse_sections(schema, preset_name):
         _parse_order(audio, 'audio.order', preset_name),
         pdf_fields,
         _parse_order(pdf, 'pdf.order', preset_name),
+        mirror_preset,
+        mirror_swap,
     )
 
 
