@@ -1,13 +1,15 @@
-"""Оркестрація режиму mirror: дублікати нот у нотетайп зворотного напрямку.
+"""Orchestration of the mirror mode: note duplicates in a reverse-direction notetype.
 
-Вихідний пресет задає секцією [mirror], куди писати (preset) і яку пару
-полів переставити (swap). Дублікат іде в окремий нотетайп навмисно: якби він
-лежав у тому самому, режими resync і audio зіставляли б його за тим самим
-model_name і бачили б цільову мову там, де тепер переклад.
+The source preset states in its [mirror] section where to write (preset) and
+which field pair to swap (swap). The duplicate goes into a separate notetype on
+purpose: lying in the same one, it would be matched by the resync and audio
+modes under the same model_name, and they would see the target language where
+the translation now is.
 
-Аудіополе копіюється як є. Це не випадковість: імʼя файлу - відпечаток
-тексту, а текст після перестановки просто лежить в іншому полі, тож пресет
-приймача (де [cards] вказує на це інше поле) вважає таке аудіо актуальним.
+The audio field is copied as is. That is no accident: the file name is a
+fingerprint of the text, and after the swap the text simply sits in another
+field, so the receiving preset (whose [cards] points at that other field)
+considers such audio up to date.
 """
 
 import sys
@@ -21,14 +23,14 @@ class MirrorError(Exception):
 
 
 def escape_query_value(value):
-    """Значення для Anki-запиту в лапках; ті самі правила, що в resync."""
+    """A value for an Anki query, in quotes; the same rules as in resync."""
     for char in ('\\', '"', '*', '_', ':'):
         value = value.replace(char, '\\' + char)
     return '"%s"' % value
 
 
 def resolve_targets(client, target, presets):
-    """Назва пресету або Anki-запит -> (note_ids, підпис для виводу)."""
+    """Preset name or Anki query -> (note_ids, label for the output)."""
     preset = next((item for item in presets if item.name == target), None)
     if preset is None:
         return client.find_notes(target), target
@@ -39,10 +41,10 @@ def resolve_targets(client, target, presets):
 
 
 def mirrored_fields(note, swap, target_fields):
-    """Поля ноти для дубліката: копія за назвами плюс переставлена пара.
+    """Note fields for the duplicate: a copy by name plus the swapped pair.
 
-    Копіюються лише поля, які є в нотетайпі приймача: решта просто не має
-    куди лягти.
+    Only fields that exist in the receiving notetype are copied: the rest simply
+    have nowhere to go.
     """
     first, second = swap
     fields = {}
@@ -56,10 +58,10 @@ def mirrored_fields(note, swap, target_fields):
 
 
 def build_notes(notes, sources, targets, client, extra_tags):
-    """Ноти -> (заготовки, пропущені типи, перше поле кожного нотетайпу).
+    """Notes -> (drafts, skipped types, first field of each notetype).
 
-    Перше поле потрібне окремо: саме за ним Anki визначає дублікати, тож за
-    ним же ловляться повтори всередині самої вибірки.
+    The first field is needed separately: Anki determines duplicates by it, so
+    repeats inside the selection itself are caught by it too.
     """
     prepared = []
     skipped = {}
@@ -83,12 +85,12 @@ def build_notes(notes, sources, targets, client, extra_tags):
 
 
 def select_addable(prepared, checks, first_fields):
-    """Розкладає заготовки на ті, що додаються, і причини відмови.
+    """Splits the drafts into the addable ones and the reasons for refusal.
 
-    canAddNotesWithErrorDetail звіряє кожну ноту з колекцією, але не з
-    рештою того самого запиту, а addNotes додає їх по черзі - тож два
-    дублікати з однаковим першим полем валять увесь запит. Тому повтори
-    всередині вибірки відсіюються тут.
+    canAddNotesWithErrorDetail checks each note against the collection but not
+    against the rest of the same request, while addNotes adds them one by one -
+    so two duplicates with the same first field bring down the whole request.
+    That is why repeats inside the selection are filtered out here.
     """
     fresh = []
     duplicate = 0
@@ -113,7 +115,7 @@ def select_addable(prepared, checks, first_fields):
 
 
 def confirm(prepared, swap_by_model):
-    """Питає підтвердження: mirror створює ноти, і скасувати це важче, ніж правку."""
+    """Asks for confirmation: mirror creates notes, and undoing that is harder than an edit."""
     print('буде створено нот: %d' % len(prepared))
     for note, prepared_note in prepared[:5]:
         first = swap_by_model[note['modelName']][0]
@@ -168,8 +170,8 @@ def run(target, settings, client, extra_tags):
         'mirror',
     )
 
-    # Колода приймача має існувати: Anki створює відсутню мовчки, і дублікати
-    # осіли б у новоствореній колоді з назвою-заглушкою
+    # The receiving deck has to exist: Anki creates a missing one silently, and
+    # the duplicates would settle in a newly made deck named after a placeholder
     decks = set(client.call('deckNames'))
     for receiver in set(targets.values()):
         if receiver.deck_name not in decks:
@@ -182,15 +184,15 @@ def run(target, settings, client, extra_tags):
         print('жодної придатної ноти')
         return False
 
-    # Повторний запуск на тій самій вибірці нічого не дублює: Anki відхиляє
-    # ноту з уже наявним першим полем
+    # A repeat run on the same selection duplicates nothing: Anki rejects a note
+    # whose first field already exists
     checks = client.call('canAddNotesWithErrorDetail', notes=[item for _, item in prepared])
     fresh, duplicate, repeated, rejected = select_addable(prepared, checks, first_fields)
 
     if duplicate:
         print('уже існують: %d' % duplicate)
     if repeated or rejected:
-        # Без flush рядки в stderr випереджають щойно надрукований звіт
+        # Without a flush the stderr lines jump ahead of the report just printed
         sys.stdout.flush()
     for note, key in repeated:
         print('дубль усередині вибірки: nid:%d – %s' % (note['noteId'], key[:50]), file=sys.stderr)

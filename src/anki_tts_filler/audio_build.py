@@ -1,8 +1,9 @@
-"""Оркестрація режиму audio: Anki-ноти -> озвучені сегменти -> один mp3.
+"""Orchestration of the audio mode: Anki notes -> spoken segments -> one mp3.
 
-Не плутати з audio.py: та частина для режимів cards і resync (коротке аудіо
-в поле Anki), тут - довга доріжка для прослуховування (цільова мова -> пауза
--> переклад -> пауза -> цільова мова ще раз) по одному Anki-запиту за раз.
+Not to be confused with audio.py: that part serves the cards and resync modes
+(short audio into an Anki field), while this one builds a long track for
+listening (target language -> gap -> translation -> gap -> target language
+again), one Anki query at a time.
 """
 
 import asyncio
@@ -32,14 +33,15 @@ def require_tools():
 
 
 def safe_name(query):
-    """Імʼя вихідного файлу із запиту: tag:no\\_familie -> no_familie.
+    """Output file name from a query: tag:no\\_familie -> no_familie.
 
-    Зворотні слеші - це екранування шаблонів Anki, а не частина назви, тому
-    знімаються; провідний tag:/deck: теж, інакше імʼя виходить нечитабельним.
+    Backslashes are Anki wildcard escapes rather than part of the name, so they
+    are stripped; so is a leading tag:/deck:, otherwise the name is unreadable.
 
-    Небезпечні символи злипаються в "-", тож два різні запити ('deck:x -is:new'
-    і 'deck:x -is:due') дали б один файл. Коли заміни справді були, до імені
-    додається хвіст із хешу запиту; імена запитів без таких символів незмінні.
+    Unsafe characters collapse into "-", so two different queries ('deck:x
+    -is:new' and 'deck:x -is:due') would give one file. When substitutions did
+    happen, a tail of the query hash is appended; names of queries without such
+    characters stay unchanged.
     """
     text = QUERY_PREFIX_RE.sub('', query.replace('\\', '').strip()).replace('::', '__')
     name = UNSAFE_RE.sub('-', text).strip('-')
@@ -71,7 +73,7 @@ def probe_format(path):
 
 
 def probe_formats(paths):
-    """Формати всіх унікальних файлів. Потоки, бо кожен ffprobe - окремий процес."""
+    """Formats of every unique file. Threads, because each ffprobe is a separate process."""
     unique = sorted(set(paths))
     with ThreadPoolExecutor(max_workers=PROBE_WORKERS) as pool:
         formats = pool.map(probe_format, unique)
@@ -111,11 +113,11 @@ def write_concat_list(paths, list_path):
 
 
 def concat(paths, out_path, list_path, formats, bitrate):
-    """Склеює доріжки. ``-c copy`` тільки коли всі джерела мають однаковий формат.
+    """Concatenates the tracks. ``-c copy`` only when every source shares a format.
 
-    Файли з collection.media створені не нами, тож їхній sample rate чи
-    кількість каналів можуть відрізнятися від виходу edge-tts. Копіювання
-    потоку в такому разі тихо псує склейку, тому перекодовуємо.
+    Files from collection.media were not created by us, so their sample rate or
+    channel count may differ from the edge-tts output. Copying the stream in
+    that case quietly corrupts the result, so it is re-encoded instead.
     """
     write_concat_list(paths, list_path)
     distinct = set(formats.values())
@@ -126,8 +128,8 @@ def concat(paths, out_path, list_path, formats, bitrate):
         args += ['-c', 'copy']
         mode = 'copy'
     else:
-        # Найнижчий спільний формат саме за числами: sorted() порівнював би
-        # рядки, де "8000" виявляється більшим за "48000".
+        # Lowest common format compared as numbers: ``sorted()`` would compare
+        # strings, where "8000" comes out greater than "48000".
         codec, sample_rate, channels = min(distinct, key=lambda fmt: (int(fmt[1]), int(fmt[2])))
         args += ['-c:a', 'libmp3lame', '-b:a', bitrate, '-ar', sample_rate, '-ac', channels]
         mode = 'encode'
@@ -154,7 +156,7 @@ def voice_params(settings, lang):
 
 
 async def resolve_paths(utterances, settings, cache, media_dir):
-    """Кожній репліці зіставляє mp3: готовий файл з Anki або свіжий TTS."""
+    """Maps every utterance to an mp3: a ready file from Anki or fresh TTS."""
     resolved = {}
     pending = {}
     from_media = 0
@@ -179,11 +181,11 @@ async def resolve_paths(utterances, settings, cache, media_dir):
 
 
 def add_silence(sequence, silences, value):
-    """Пауза 0 означає "без паузи".
+    """A gap of 0 means "no gap".
 
-    Файла тиші для неї нема: ffmpeg робить на ``-t 0`` mp3 без жодного фрейму,
-    а concat на такому файлі завершується кодом 0 і мовчки відкидає решту
-    доріжки - виходить обрізаний результат без жодної помилки.
+    There is no silence file for it: on ``-t 0`` ffmpeg makes an mp3 without a
+    single frame, and concat on such a file exits with code 0 while silently
+    dropping the rest of the track - the result is truncated with no error at all.
     """
     path = silences.get(value)
     if path is not None:
@@ -191,11 +193,12 @@ def add_silence(sequence, silences, value):
 
 
 def side_gaps(order, gap):
-    """Пауза після кожної сторони, крім останньої.
+    """The gap after every side except the last.
 
-    Між двома повторами цільової мови пауза своя (between_repeats): after_target
-    це час на згадати переклад, і між повторами, що йдуть уже після перекладу,
-    така довга пауза зайва.
+    Between two repeats of the target language the gap is its own
+    (between_repeats): after_target is time to recall the translation, and
+    between repeats that already follow the translation such a long gap is
+    pointless.
     """
     values = []
     for index in range(len(order) - 1):
@@ -210,7 +213,7 @@ def side_gaps(order, gap):
 
 
 def assemble(card_list, resolved, plan, silences):
-    """Розкладає картки в плоский список доріжок із паузами між ними."""
+    """Lays the cards out as a flat list of tracks with gaps between them."""
     order = plan['order']
     sequence = []
     for card_index, card in enumerate(card_list):
@@ -229,11 +232,11 @@ def assemble(card_list, resolved, plan, silences):
 
 
 def order_cards(card_list, orders, language):
-    """Розкладає картки за порядком із пресетів, не розриваючи ноту.
+    """Orders the cards by the preset order without breaking a note apart.
 
-    Картки однієї ноти йдуть поспіль (основна форма, далі приклади), тому
-    переставляються групи, а не окремі картки. Для абетки ключ - перша
-    репліка цільової мови в групі.
+    Cards of one note go one after another (the main form, then the examples),
+    so groups are rearranged rather than individual cards. The alphabet key is
+    the first target-language line in the group.
     """
     groups = []
     for card in card_list:
@@ -263,20 +266,20 @@ async def build(query, notes, settings, cache, media_dir, field_map, orders):
     if not card_list:
         return None, base_stats
 
-    # Порядок карток фіксований порядком нот з Anki, через що послідовність
-    # запамʼятовується разом зі словами. Пресет із order = "random" це знімає.
+    # Card order is fixed by the note order from Anki, so the sequence gets
+    # memorised along with the words. A preset with order = "random" lifts that.
     card_list = order_cards(card_list, orders, settings.language)
 
     all_utterances = [u for card in card_list for u in card.utterances()]
     resolved, from_media = await resolve_paths(all_utterances, settings, cache, media_dir)
 
-    # Формат тиші має збігатися з форматом доріжок, інакше склейка копіюванням
-    # потоку дасть розсинхрон. Беремо найпоширеніший формат серед джерел.
+    # Silence must match the format of the tracks, otherwise concatenating by
+    # stream copy desynchronises. Take the most common format among the sources.
     voice_paths = sorted(set(resolved.values()))
     formats = probe_formats(voice_paths)
     base_format = max(set(formats.values()), key=list(formats.values()).count)
 
-    # target -> native -> target, повторений settings.content.repeat_target разів
+    # target -> native -> target, repeated ``settings.content.repeat_target`` times
     order = [config.LANG_TARGET, config.LANG_NATIVE]
     order += [config.LANG_TARGET] * settings.content.repeat_target
     plan = {

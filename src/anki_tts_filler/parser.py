@@ -1,6 +1,6 @@
-# Рядок "tags: a b" задає теги ноти, а не поле нотетайпу. Якщо в нотетайпі
-# справді є поле з такою назвою, воно має пріоритет: тоді теги задаються
-# тільки прапорцем --tag
+# The line "tags: a b" sets the note tags, not a notetype field. If the notetype
+# really does have a field with that name, the field wins: tags are then set
+# only by the ``--tag`` flag
 TAGS_KEY = 'tags'
 
 
@@ -21,9 +21,9 @@ def split_blocks(text):
 
 
 def parse_card(lines, text_fields):
-    """Блок рядків -> (поля, теги, помилка).
+    """Block of lines -> (fields, tags, error).
 
-    Відсутнє поле лишається порожнім, зайве/невідоме поле - помилка картки.
+    A missing field stays empty; an extra or unknown field is a card error.
     """
     card = {f: '' for f in text_fields}
     tags = []
@@ -42,7 +42,7 @@ def parse_card(lines, text_fields):
 
 
 def split_cards(text, text_fields):
-    # Картки розділяються порожнім рядком, а не повторенням певного ключа
+    # Cards are separated by a blank line, not by a repeated key
     return [parse_card(block, text_fields) for block in split_blocks(text)]
 
 

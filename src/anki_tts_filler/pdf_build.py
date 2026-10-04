@@ -1,13 +1,13 @@
-"""Друкована версія тієї самої вибірки, що й режим audio.
+"""A printed version of the same selection as the audio mode.
 
-Той самий Anki-запит і ті самі пресети, але замість склейки mp3 - сторінка на
-друк: поля зі списку [pdf] fields, кожне окремим рядком, картки одна за одною.
-Поділу на сторони target і native тут нема - поля йдуть підряд, у тому
-порядку, в якому записані в пресеті.
+The same Anki query and the same presets, but instead of concatenating mp3
+files - a page for printing: the fields from the [pdf] fields list, each on its
+own line, cards one after another. There is no split into target and native
+sides here - the fields follow one another in the order written in the preset.
 
-HTML тут проміжний формат: у PDF його переганяє headless Chrome, щоб не тягнути
-в проєкт залежність заради друку, після чого HTML видаляється. Лишається він
-тільки тоді, коли Chrome не знайдено.
+HTML is an intermediate format here: headless Chrome turns it into a PDF, so
+that no dependency is pulled into the project just for printing, after which
+the HTML is deleted. It is kept only when Chrome was not found.
 """
 
 import html
@@ -20,8 +20,8 @@ from datetime import date
 from . import config, note_cards
 from .audio_build import safe_name
 
-# Chrome у headless-режимі вміє --print-to-pdf; шукаємо і macOS-застосунок,
-# і команду в PATH (на Linux буде саме вона)
+# Headless Chrome can do ``--print-to-pdf``; look for both the macOS app and a
+# command in PATH (on Linux it is the latter)
 CHROME_APPS = (
     '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
     '/Applications/Chromium.app/Contents/MacOS/Chromium',
@@ -46,10 +46,10 @@ class PdfError(Exception):
 
 
 def note_lines(note, fields):
-    """Поля ноти окремими рядками, рівно ті й у тому порядку, що в [pdf] fields.
+    """Note fields as separate lines, exactly those and in the [pdf] fields order.
 
-    Порожнє поле рядка не дає, а поле з кількох рядків (<br> в Anki) лягає
-    кількома рядками.
+    An empty field yields no line, while a field of several lines (<br> in Anki)
+    lands as several lines.
     """
     lines = []
     for name in fields:
@@ -63,8 +63,8 @@ def render(cards, query, lang):
         rows = ''.join('<div class="line">%s</div>' % html.escape(text) for text in lines)
         blocks.append('<div class="card">%s</div>' % rows)
 
-    # У заголовку запит без екранування: зворотний слеш - це синтаксис
-    # пошуку Anki, а не частина назви тегу
+    # The query in the heading keeps no escaping: a backslash is Anki search
+    # syntax, not part of the tag name
     title = html.escape(query.replace('\\', ''))
     head = '%s <span>· карток: %d · %s</span>' % (title, len(cards), date.today().isoformat())
     return (
@@ -86,7 +86,7 @@ def find_chrome():
 
 
 def pdf_ready(path):
-    """PDF дописаний, коли в хвості зʼявився маркер %%EOF."""
+    """The PDF is complete once the %%EOF marker shows up in its tail."""
     size = os.path.getsize(path)
     if size < 32:
         return False
@@ -96,11 +96,11 @@ def pdf_ready(path):
 
 
 def to_pdf(chrome, html_path, profile_dir):
-    """HTML -> PDF через headless Chrome.
+    """HTML -> PDF through headless Chrome.
 
-    Окремий --user-data-dir потрібен, щоб не чіпати профіль користувача, але
-    саме з ним Chrome після друку не завершується сам - тому чекаємо готовий
-    файл і зупиняємо процес.
+    A separate --user-data-dir is needed so the user profile is left alone, but
+    with it Chrome does not exit by itself after printing - so we wait for the
+    finished file and stop the process.
     """
     pdf_path = html_path[:-len('.html')] + '.pdf'
     if os.path.exists(pdf_path):
@@ -173,7 +173,7 @@ def run(query, settings, client):
         if not lines:
             skipped[note['modelName']] = skipped.get(note['modelName'], 0) + 1
             continue
-        # для абетки ключ - перший рядок картки
+        # for the alphabet the key is the first line of the card
         entries.append((lines, orders.get(note['modelName'], config.ORDER_LINEAR), lines[0]))
 
     for model, count in sorted(skipped.items()):
@@ -193,7 +193,7 @@ def run(query, settings, client):
 
     if chrome:
         out_path = to_pdf(chrome, html_path, os.path.join(settings.work_dir, 'chrome'))
-        # HTML свою роль відіграв: далі потрібен тільки PDF
+        # The HTML has served its purpose: only the PDF is needed from here on
         os.remove(html_path)
     else:
         out_path = html_path

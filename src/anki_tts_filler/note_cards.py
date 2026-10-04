@@ -1,8 +1,9 @@
-"""Перетворення нот Anki у картки з окремими сторонами target і native.
+"""Turning Anki notes into cards with separate target and native sides.
 
-Схема полів береться з секції [audio] у presets/*.toml: target - сторона
-мови, яку вчать, native - переклад, examples - поле з прикладами. Конкретних
-мов тут немає: вони задаються голосами в settings.toml.
+The field schema comes from the [audio] section in presets/*.toml: target is
+the side in the language being learnt, native is the translation, examples is
+the field with examples. No specific language appears here: they are set by the
+voices in settings.toml.
 """
 
 import html
@@ -18,24 +19,25 @@ SOUND_RE = re.compile(r'\[sound:([^\]]+)\]')
 CLOZE_RE = re.compile(r'\{\{c\d+::(.*?)(?:::[^}]*?)?\}\}')
 NBSP_RE = re.compile(r'[ ​]')
 WS_RE = re.compile(r'\s+')
-# Інлайновий тег усередині речення лишає по собі пробіл ("du <b>fra</b>?" ->
-# "du fra ?"). Три крапки з пробілом перед ними ставлять навмисно, тож
-# послідовність крапок не чіпаємо.
+# An inline tag inside a sentence leaves a space behind ("du <b>fra</b>?" ->
+# "du fra ?"). An ellipsis with a space before it is written on purpose, so a
+# run of dots is left alone.
 SPACE_PUNCT_RE = re.compile(r'\s+(?!\.\.)([.,!?;:])')
 DASH = '–'
 
-# Ключ сортування для літер, що йдуть після "z": за кодами символів вони
-# опинилися б не там, де стоять в абетці цільової мови. Підстановка саме в
-# хвіст, тому працює для абеток на латиниці; див. LanguageConfig у config.py
+# Sort key for letters that come after "z": by code point they would land
+# somewhere other than their place in the target alphabet. The substitution goes
+# to the tail, so it works for Latin alphabets; see ``LanguageConfig`` in config.py
 SORT_TAIL = 'zz%02d'
 
 
 def load_field_map(presets):
-    """presets (config.Preset) -> {model_name: {'sides': {...}, 'examples': поле}}.
+    """presets (config.Preset) -> {model_name: {'sides': {...}, 'examples': field}}.
 
-    Поля беруться з секції [audio] пресету, а готові [sound:...] шукаються за
-    мапінгом із [cards]. Пресет без обох сторін audio-режиму не обслуговує -
-    ноти такого типу пропускаються (як і невідомий modelName).
+    The fields come from the [audio] section of a preset, while ready
+    [sound:...] tags are looked up through the mapping from [cards]. A preset
+    without both sides does not serve the audio mode - notes of that type are
+    skipped, as is an unknown modelName.
     """
     field_map = {}
     for preset in presets:
@@ -73,7 +75,7 @@ class Card:
 
 
 def clean_text(raw):
-    """HTML-поле Anki -> плоский текст, придатний для TTS."""
+    """An Anki HTML field -> flat text fit for TTS."""
     text = BR_RE.sub(' ', raw)
     text = SOUND_RE.sub(' ', text)
     text = CLOZE_RE.sub(r'\1', text)
@@ -90,7 +92,7 @@ def media_name(raw):
 
 
 def note_value(note, name):
-    """Значення поля ноти з notesInfo; відсутнє поле - порожній рядок."""
+    """A note field value from notesInfo; a missing field gives an empty string."""
     field_data = note['fields'].get(name)
     return field_data['value'] if field_data else ''
 
@@ -103,11 +105,12 @@ def split_lines(raw):
 
 
 def note_pairs(raw):
-    """Розбирає поле з прикладами на пари 'цільова мова – переклад'.
+    """Parses the examples field into 'target language – translation' pairs.
 
-    Розділювач - перший en dash у рядку: у правій частині він трапляється
-    повторно ('En idé er et abstrakt ord. – Ідея – це абстрактне слово.').
-    Рядки без en dash - це пояснення рідною мовою, їх пропускаємо.
+    The separator is the first en dash in the line: in the right-hand part it
+    occurs again ('En idé er et abstrakt ord. – Ідея – це абстрактне слово.').
+    Lines without an en dash are explanations in the native language and are
+    skipped.
     """
     for line in split_lines(raw):
         if DASH not in line:
@@ -144,12 +147,12 @@ def build_card(note, use_anki_media, field_map):
 
 
 def build_note_cards(note, use_anki_media, field_map):
-    """Нота -> основна картка плюс по картці на кожен приклад.
+    """A note -> the main card plus one card per example.
 
-    Поле з прикладами задає ``examples`` у секції [audio] пресету. Приклади
-    саме окремими картками: всередині однієї картки спершу звучать усі
-    репліки цільової мови і лише потім усі переклади, тож пара
-    "приклад - переклад" розсипалася б по різних кінцях картки.
+    The examples field is named by ``examples`` in the [audio] section of a
+    preset. Examples become separate cards on purpose: inside one card every
+    target-language line is spoken first and only then every translation, so an
+    "example - translation" pair would be scattered to opposite ends of the card.
     """
     card = build_card(note, use_anki_media, field_map)
     if card is None:
@@ -171,11 +174,11 @@ def build_note_cards(note, use_anki_media, field_map):
 
 
 def sort_key(text, language):
-    """Ключ абетки цільової мови: без початкового артикля і з її літерами в кінці.
+    """Alphabet key of the target language: no leading article, its letters last.
 
-    Артиклі (``sort_prefixes``) і літери після "z" (``sort_extra_letters``)
-    задаються в секції [language] settings.toml - у самому коді ніякої
-    конкретної мови немає.
+    The articles (``sort_prefixes``) and the letters after "z"
+    (``sort_extra_letters``) are set in the [language] section of settings.toml -
+    no specific language lives in the code itself.
     """
     lowered = text.strip().lower()
     for prefix in language.sort_prefixes:
@@ -190,11 +193,11 @@ def sort_key(text, language):
 
 
 def apply_order(entries, language):
-    """entries - [(елемент, порядок, текст для абетки)] у порядку з Anki.
+    """entries - [(item, order, text for the alphabet)] in the order from Anki.
 
-    Елементи лінійних пресетів лишаються рівно там, де стояли; випадкові
-    перемішуються між своїми ж позиціями, впорядковані - сортуються між
-    своїми. Тому пресети з різним порядком не заважають один одному.
+    Items of linear presets stay exactly where they were; random ones are
+    shuffled among their own positions, sorted ones are sorted among theirs.
+    That is why presets with different orders do not interfere with each other.
     """
     ordered = [entry[0] for entry in entries]
     for mode in (config.ORDER_RANDOM, config.ORDER_SORTED):
@@ -212,7 +215,7 @@ def apply_order(entries, language):
 
 
 def build_cards(notes, use_anki_media, field_map):
-    """Повертає картки і лічильник пропущених типів нот (без пресету на цей modelName)."""
+    """Returns the cards and a counter of skipped note types (no preset for that modelName)."""
     cards = []
     skipped = {}
     for note in notes:

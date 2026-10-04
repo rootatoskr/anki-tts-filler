@@ -1,8 +1,9 @@
-"""Синтез мовлення через edge-tts із кешем на диску.
+"""Speech synthesis through edge-tts with an on-disk cache.
 
-Спільне ядро обох режимів: запис через тимчасовий ``.part``, відсів порожніх
-відповідей edge-tts, повтори і спільний семафор. Режим cards підставляє свою
-схему імен і обрізання тиші через підклас у audio.py.
+The shared core of both modes: writing through a temporary ``.part`` file,
+discarding empty edge-tts responses, retries and a shared semaphore. The cards
+mode supplies its own naming scheme and silence trimming via a subclass in
+audio.py.
 """
 
 import asyncio
@@ -20,10 +21,10 @@ class TtsError(Exception):
 
 
 class TtsCache:
-    """Ключ кешу - хеш від тексту та всіх параметрів голосу.
+    """The cache key is a hash of the text and every voice parameter.
 
-    Зміна тексту в Anki або швидкості в settings.toml дає новий ключ
-    автоматично, тож інвалідація кешу не потрібна.
+    Changing the text in Anki or the rate in settings.toml yields a new key
+    automatically, so cache invalidation is not needed.
     """
 
     def __init__(self, cache_dir, concurrency):
@@ -39,18 +40,18 @@ class TtsCache:
         return os.path.join(self.cache_dir, hashlib.sha1(key).hexdigest() + '.mp3')
 
     def postprocess(self, path):
-        """Обробка щойно синтезованого файлу перед тим, як він стане кешем."""
+        """Processing of a freshly synthesised file before it becomes a cache entry."""
 
     async def synthesize(self, text, voice, rate, volume):
         path = self.path_for(text, voice, rate, volume)
-        # Порожній файл лишається від обірваних запусків старих версій -
-        # це не кеш, його треба озвучити наново
+        # An empty file is left over from interrupted runs of older versions -
+        # that is not a cache entry, it has to be synthesised again
         if os.path.exists(path) and os.path.getsize(path) > 0:
             self.hits += 1
             return path
 
-        # Один і той самий текст трапляється в кількох картках: тримаємо
-        # спільну задачу, щоб не ходити в мережу двічі за той самий файл.
+        # The same text shows up in several cards: keep one shared task so the
+        # network is not hit twice for the same file.
         task = self._inflight.get(path)
         if task is None:
             task = asyncio.create_task(self._render(text, voice, rate, volume, path))
@@ -78,9 +79,9 @@ class TtsCache:
                 _remove(partial)
                 raise TtsError('edge-tts повернув порожній файл для %r' % text)
             try:
-                # У потоці, бо postprocess - це синхронний ffmpeg: у самому
-                # loop він блокував би всі інші синтези, зводячи concurrency
-                # до одного файлу за раз
+                # In a thread, because ``postprocess`` is a synchronous ffmpeg call:
+                # inside the loop it would block every other synthesis, reducing
+                # concurrency to one file at a time
                 await asyncio.to_thread(self.postprocess, partial)
             except Exception as exc:
                 _remove(partial)

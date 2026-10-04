@@ -1,8 +1,8 @@
-"""TTS для режимів cards і resync: коротке аудіо в поле ноти Anki.
+"""TTS for the cards and resync modes: short audio into an Anki note field.
 
-Синтез, кеш і повтори спільні з режимом audio (tts_cache.py); тут лише своя
-схема імен файлів (як у медіатеці Anki), обрізання тиші й заливання нових
-файлів у медіатеку.
+Synthesis, caching and retries are shared with the audio mode (tts_cache.py);
+what lives here is only the file naming scheme (as in the Anki media), silence
+trimming and uploading new files into the media.
 """
 
 import asyncio
@@ -29,7 +29,7 @@ def media_pattern():
 
 
 def cache_path():
-    """Кеш згенерованих mp3 - поруч із cards.txt, у директорії запуску."""
+    """Cache of the generated mp3 files - next to cards.txt, in the launch directory."""
     return os.path.join(os.getcwd(), AUDIO_CACHE_DIR)
 
 
@@ -52,13 +52,13 @@ def _trim_silence(path):
 
 
 def media_file_name(text, voice, rate, volume):
-    """Імʼя mp3 для цього тексту - єдине місце, де воно обчислюється.
+    """The mp3 name for this text - the single place where it is computed.
 
-    Чиста функція, тому режим resync може заздалегідь порахувати, які поля
-    справді зміняться, і озвучити лише їх.
+    A pure function, so the resync mode can work out in advance which fields
+    really change and synthesise only those.
     """
-    # Нейтральна гучність у ключ не входить: інакше всі вже залиті в Anki
-    # langdeck_* файли перегенерувалися б і продублювалися в медіатеці.
+    # Neutral volume stays out of the key: otherwise every ``langdeck_*`` file
+    # already uploaded to Anki would be regenerated and duplicated in the media.
     parts = [text, voice, rate] if volume == '+0%' else [text, voice, rate, volume]
     digest = hashlib.md5('|'.join(parts).encode()).hexdigest()[:16]
     return MEDIA_PREFIX + digest + '.mp3'
@@ -69,9 +69,9 @@ def media_path(text, cache_dir, voice, rate, volume):
 
 
 def expected_tag(text, settings):
-    """[sound:...], який має стояти в аудіополі для цього тексту.
+    """The [sound:...] that belongs in the audio field for this text.
 
-    Каталог тут не потрібен: у тег іде лише імʼя файлу.
+    No directory is needed here: only the file name goes into the tag.
     """
     return sound_tag(media_file_name(
         text, settings.voice.target, settings.voice.rate_target, settings.voice.volume_target,
@@ -79,7 +79,7 @@ def expected_tag(text, settings):
 
 
 class MediaCache(TtsCache):
-    """Кеш режиму cards: імена як у медіатеці Anki, з обрізанням тиші."""
+    """Cache of the cards mode: names as in the Anki media, with silence trimmed."""
 
     def path_for(self, text, voice, rate, volume):
         return media_path(text, self.cache_dir, voice, rate, volume)
@@ -89,7 +89,7 @@ class MediaCache(TtsCache):
 
 
 def generate(texts, cache_dir, voice, rate, volume, concurrency):
-    """Тексти -> {текст: шлях до mp3}. Наявні в кеші файли не переозвучуються."""
+    """Texts -> {text: path to mp3}. Files already cached are not synthesised again."""
     ordered = list(texts)
     if not ordered:
         return {}
@@ -103,11 +103,11 @@ def generate(texts, cache_dir, voice, rate, volume, concurrency):
 
 
 def sync_media(texts, cache_dir, client, settings):
-    """Тексти -> {текст: шлях до mp3}, нові файли залиті в медіатеку Anki.
+    """Texts -> {text: path to mp3}, with new files uploaded into the Anki media.
 
-    Спільний крок режимів cards і resync: озвучення голосом цільової мови
-    плюс заливання. Різниця між режимами лишається тільки в тому, звідки
-    беруться самі тексти.
+    The step shared by the cards and resync modes: synthesis in the target
+    language voice plus the upload. The only difference between the modes is
+    where the texts themselves come from.
     """
     audio_map = generate(
         texts,
@@ -118,7 +118,7 @@ def sync_media(texts, cache_dir, client, settings):
         settings.concurrency,
     )
 
-    # Уже наявні в медіатеці Anki файли повторно не заливаються
+    # Files already present in the Anki media are not uploaded again
     existing = set(client.call('getMediaFilesNames', pattern=media_pattern()))
     for path in audio_map.values():
         name = os.path.basename(path)

@@ -1,16 +1,16 @@
-"""Оркестрація режиму resync: переозвучення вже створених нот Anki.
+"""Orchestration of the resync mode: re-synthesising audio for existing Anki notes.
 
-Та сама схема [cards] пресету, що й у режимі cards (аудіополе -> текстове
-поле). На відміну від cards, текст береться не з cards.txt, а з поточних
-значень полів уже існуючої ноти - тому й аудіо, і кеш (audio_cache/) ті самі,
-що в cards.
+The same [cards] preset schema as in the cards mode (audio field -> text
+field). Unlike cards, the text comes not from cards.txt but from the current
+field values of an existing note - which is why the audio and the cache
+(audio_cache/) are the same ones the cards mode uses.
 
-Ціль задається назвою пресету (усі ноти його нотетайпу) або Anki-запитом -
-тим самим, що в audio/pdf. Без аргументу режим друкує перелік пресетів, як
-це робить cards.
+The target is given either as a preset name (every note of its notetype) or as
+an Anki query - the same one as in audio/pdf. With no argument the mode prints
+the list of presets, the way cards does.
 
-Спершу складається план (які поля справді зміняться) і лише потім
-озвучуються тексти саме з плану: порівняння імені файлу синтезу не потребує.
+A plan is built first (which fields really change) and only then are the texts
+from that plan synthesised: comparing a file name needs no synthesis.
 """
 
 import os
@@ -26,11 +26,12 @@ class ResyncError(Exception):
 
 
 def escape_query_value(value):
-    """Значення для Anki-запиту в лапках.
+    """A value for an Anki query, in quotes.
 
-    У пошуку Anki ``_`` і ``*`` - шаблони, а ``:`` розділяє поле й значення,
-    тож назва нотетайпу з такими символами без екранування знайшла б не те.
-    Зворотний слеш іде першим, інакше він подвоїв би вже додані слеші.
+    In Anki search ``_`` and ``*`` are wildcards and ``:`` separates field from
+    value, so a notetype name with such characters would match the wrong thing
+    unescaped. The backslash goes first, otherwise it would double the slashes
+    already added.
     """
     for char in ('\\', '"', '*', '_', ':'):
         value = value.replace(char, '\\' + char)
@@ -38,10 +39,10 @@ def escape_query_value(value):
 
 
 def resolve_targets(client, target, presets):
-    """Назва пресету або Anki-запит -> (note_ids, підпис для виводу).
+    """Preset name or Anki query -> (note_ids, label for the output).
 
-    Аргумент, що збігається з назвою пресету, означає всі ноти його
-    нотетайпу; будь-який інший іде в Anki як запит.
+    An argument that matches a preset name means every note of its notetype;
+    any other argument goes to Anki as a query.
     """
     preset = next((item for item in presets if item.name == target), None)
     if preset is None:
@@ -55,12 +56,12 @@ def resolve_targets(client, target, presets):
 
 
 def build_plan(notes, index, settings):
-    """Ноти -> [(нота, {аудіополе: текст})] лише для полів, що зміняться.
+    """Notes -> [(note, {audio field: text})] for the changing fields only.
 
-    Синтезу тут немає: потрібне імʼя файлу рахується з тексту, тому план
-    відомий ще до того, як щось озвучено чи залито в Anki. У плані лишається
-    сам текст, а не очікуваний тег: тег усе одно беруть з файлу, який
-    фактично озвучився.
+    No synthesis happens here: the required file name is computed from the text,
+    so the plan is known before anything is synthesised or uploaded to Anki. The
+    plan keeps the text itself rather than the expected tag: the tag is taken
+    from the file that actually got synthesised anyway.
     """
     plan = []
     for note in notes:
@@ -76,7 +77,7 @@ def build_plan(notes, index, settings):
 
 
 def describe(plan, index):
-    """Короткий опис плану: по одному рядку на ноту, максимум кілька рядків."""
+    """A short description of the plan: one line per note, a few lines at most."""
     lines = []
     for note, changes in plan[:5]:
         text_field = next(iter(index[note['modelName']].values()))
@@ -88,17 +89,18 @@ def describe(plan, index):
 
 
 def confirm(plan, index):
-    """Питає підтвердження перед записом у багато нот.
+    """Asks for confirmation before writing to many notes.
 
-    Без термінала відповіді взяти нізвідки, тому вважаємо відмовою: інакше
-    запуск зі скрипта переозвучив би все мовчки.
+    With no terminal there is nowhere to get an answer, so it counts as a
+    refusal: otherwise a run from a script would re-synthesise everything
+    silently.
     """
     fields = sum(len(changes) for _, changes in plan)
     print('зміниться нот: %d (аудіополів: %d)' % (len(plan), fields))
     for line in describe(plan, index):
         print(line)
     if not sys.stdin.isatty():
-        # Без flush рядок у stderr випереджає щойно надрукований план
+        # Without a flush the stderr line jumps ahead of the plan just printed
         sys.stdout.flush()
         print('це більше за resync.confirm_from, а підтвердити ніде - звузь запит', file=sys.stderr)
         return False
@@ -151,7 +153,7 @@ def run(query, settings, client):
 
     cache_dir = cache_path()
     os.makedirs(cache_dir, exist_ok=True)
-    # Озвучуються тільки тексти з плану, а не всі поля всіх знайдених нот
+    # Only texts from the plan are synthesised, not every field of every note found
     texts = {text for _, changes in plan for text in changes.values() if text}
     audio_map = sync_media(texts, cache_dir, client, settings)
 

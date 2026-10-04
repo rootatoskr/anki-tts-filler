@@ -1,4 +1,4 @@
-"""Клієнт AnkiConnect на stdlib, без зовнішніх залежностей."""
+"""AnkiConnect client on the stdlib, with no external dependencies."""
 
 import json
 import urllib.error
@@ -43,7 +43,7 @@ class AnkiConnect:
         return self.call('findNotes', query=query)
 
     def notes_info(self, note_ids):
-        """Тягне ноти пачками: один запит на 3000+ id дає надто великий відповідь."""
+        """Fetches notes in batches: one request for 3000+ ids gives too large a response."""
         result = []
         for start in range(0, len(note_ids), NOTES_CHUNK):
             chunk = note_ids[start:start + NOTES_CHUNK]

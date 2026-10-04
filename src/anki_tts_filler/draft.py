@@ -1,13 +1,13 @@
-"""Чернетка cards.txt зі списку "норвезька + українська в одному рядку".
+"""A cards.txt draft from a list of "Latin + Cyrillic on one line".
 
-Зміст беруть як є, з чотирьох механічних правок: перша літера кожного речення
-стає малою (у note регістр не чіпається), крапка в кінці значення знімається,
-тире стає en dash (з пробілом з обох боків), а те, що взяте в подвійні дужки,
-іде в note.
+The content is taken as is, with four mechanical fixes: the first letter of
+every sentence is lowercased (case in note is left alone), a dot at the end of
+a value is removed, a dash becomes an en dash (with a space on each side), and
+whatever is wrapped in double parentheses goes into note.
 
-Розбір - по межі скриптів кирилиця/латиниця, тому працює миттєво й
-детерміновано, без ШІ. Режим навмисно вузький - тільки пресет base із
-полями production, recognition і note.
+Parsing follows the Cyrillic/Latin script boundary, so it works instantly and
+deterministically, with no AI. The mode is deliberately narrow - only the base
+preset, with the fields production, recognition and note.
 """
 
 import re
@@ -17,34 +17,35 @@ TARGET_FIELD = 'production'
 NOTE_FIELD = 'note'
 FIELDS = (SOURCE_FIELD, TARGET_FIELD, NOTE_FIELD)
 
-# Режим прив'язаний до одного пресету: назви полів вище - конкретні поля
-# base, для іншого нотетайпу вони були б просто неправдою
+# The mode is bound to a single preset: the field names above are the concrete
+# fields of base, and for another notetype they would simply be untrue
 PRESET_NAME = 'base'
 
 CYRILLIC_CHAR_RE = re.compile(r'[Ѐ-ӿ]')
 WS_RE = re.compile(r'\s+')
 _DASHES = '-‐‑‒–—―'
-# Тире стає " – " (en dash, по одному пробілу з обох боків) навіть там, де
-# пробілу не було ("disse -ці" -> "disse – ці"), але тільки якщо з якогось
-# боку пробіл усе-таки є. Тире всередині слова - частина самого слова
-# ("T-bane", "e-post", "смс-повідомлення"), і розривати його не можна
+# A dash becomes " – " (en dash, one space on each side) even where there was
+# no space ("disse -ці" -> "disse – ці"), but only if a space is present on one
+# side at least. A dash inside a word is part of the word itself ("T-bane",
+# "e-post", "смс-повідомлення") and must not be broken up
 DASH_RE = re.compile(r'\s+[%s]\s*|\s*[%s]\s+' % (_DASHES, _DASHES))
-# Роздільник між мовами, що лишається зайвим "– " у кінці норвезької частини
-# після відсічення кирилиці (наприклад "en kunde – один клієнт")
+# The separator between the languages, left over as a stray "– " at the end of
+# the Latin part once the Cyrillic is cut off (for example "en kunde – один клієнт")
 TRAILING_DASH_RE = re.compile(r'\s*–\s*$')
-# Ремарка для note позначається подвійними дужками, і місце в рядку значення
-# не має. Одинарні дужки лишаються частиною самого тексту картки
-# ("en kokk (et yrke)"), бо позначка тепер явна й угадувати нема чого
+# A remark for note is marked by double parentheses, and its place in the line
+# does not matter. Single parentheses stay part of the card text itself
+# ("en kokk (et yrke)"), because the marker is explicit and nothing is guessed
 DOUBLE_PAREN_RE = re.compile(r'\(\((.+?)\)\)')
-# Переклад цифрами замість кирилиці: "førti 40", "to tusen og ti 2010"
+# Translation in digits instead of Cyrillic: "førti 40", "to tusen og ti 2010"
 TRAILING_NUMBER_RE = re.compile(r'\s+(\d[\d\s]*)$')
-# Крапка в кінці значення: у картці вона зайва. Знімається лише одинична - "..."
-# ставлять навмисно ("jeg heter ..."), а знак питання й оклику несуть зміст.
-# Крапки всередині не чіпаються, інакше два речення злиплися б в одне
+# A dot at the end of a value is redundant on a card. Only a single one is
+# removed - "..." is written on purpose ("jeg heter ..."), while a question or
+# exclamation mark carries meaning. Dots inside are left alone, otherwise two
+# sentences would run together
 TRAILING_DOT_RE = re.compile(r'(?<!\.)\.$')
-# Початок речення: сам початок значення або після . ? ! з пробілом. З малої
-# робиться лише ця одна літера, тому власні назви в середині речення
-# ("jeg bor i Oslo") лишаються як були
+# Start of a sentence: the very start of the value, or after . ? ! plus a space.
+# Only that one letter is lowercased, so proper names in the middle of a sentence
+# ("jeg bor i Oslo") stay as they were
 SENTENCE_START_RE = re.compile(r'(^|[.!?]\s+)(\w)')
 
 
@@ -61,16 +62,16 @@ def strip_dot(text):
 
 
 def lower_sentences(text):
-    """З малої лише перша літера кожного речення, решта тексту без змін."""
+    """Only the first letter of every sentence is lowercased, the rest is untouched."""
     return SENTENCE_START_RE.sub(lambda m: m.group(1) + m.group(2).lower(), text)
 
 
 def make_card(recognition, production, note_raw):
-    """Значення картки з уже поділених частин.
+    """Card values from the already split parts.
 
-    Регістр правиться тільки на початку речень і тільки в двох основних
-    полях: note - це ремарка з подвійних дужок, узята з рядка як є, і
-    зводити її регістр нема за чим.
+    Case is fixed only at sentence starts and only in the two main fields: note
+    is a remark from double parentheses, taken from the line as is, and there is
+    nothing to normalise its case for.
     """
     card = {
         SOURCE_FIELD: strip_dot(lower_sentences(recognition)),
@@ -82,16 +83,17 @@ def make_card(recognition, production, note_raw):
 
 
 def split_line(line):
-    """Один рядок -> картка або (None, причина), якщо межу не знайдено.
+    """One line -> a card, or (None, reason) if the boundary was not found.
 
-    У note іде вміст подвійних дужок, скільком би місцях вони не стояли;
-    кілька таких груп склеюються пробілом. Знімаються вони до поділу рядка,
-    бо ремарка зазвичай містить обидві мови і межу кирилиця/латиниця збила б.
+    note receives the content of double parentheses, wherever they stand; several
+    such groups are joined with a space. They are removed before the line is
+    split, because a remark usually contains both languages and would throw off
+    the Cyrillic/Latin boundary.
     """
-    # Кінцева крапка знімається тут, а не лише при збиранні картки: інакше
-    # вона впирається в регулярку хвоста рядка і "førti 40." не розпізнався б
-    # як числівник. Регістр тут не чіпаємо: він правиться по полях, бо note
-    # виняток
+    # The trailing dot is removed here, not only when the card is assembled:
+    # otherwise it blocks the line-tail regex and "førti 40." would not be
+    # recognised as a numeral. Case is left alone here: it is fixed per field,
+    # because note is the exception
     body = strip_dot(collapse(normalize_dashes(line)))
 
     note_raw = None
@@ -102,9 +104,9 @@ def split_line(line):
 
     cyr_match = CYRILLIC_CHAR_RE.search(body)
     if not cyr_match:
-        # Числівники: переклад записаний цифрами, кирилиці в рядку нема
-        # зовсім ("førti 40"). Цифри посеред норвезької частини під це не
-        # підпадають - береться лише суцільний хвіст із цифр у кінці рядка
+        # Numerals: the translation is written in digits and there is no Cyrillic
+        # in the line at all ("førti 40"). Digits in the middle of the Latin part
+        # do not qualify - only a solid tail of digits at the end of the line
         number = TRAILING_NUMBER_RE.search(body)
         if not number:
             return None, 'немає кириличної (української) частини'
@@ -122,12 +124,12 @@ def split_line(line):
 
 
 def generate(raw):
-    """Сирий список -> (картки, зауваження). Рядок, що не розібрався, картки
-    не дає - зауваження про нього і зупиняє запис у виклику вище."""
+    """Raw list -> (cards, problems). A line that did not parse yields no card -
+    the problem about it is what stops the write in the caller above."""
     cards = []
     problems = []
-    # Нумерація за фактичними рядками файлу, а не за непорожніми: інакше з
-    # порожніми рядками номер у помилці не збігався б із номером у редакторі
+    # Numbering follows the actual file lines, not the non-empty ones: otherwise
+    # the number in an error would not match the number in the editor
     for number, line in enumerate(raw.splitlines(), 1):
         if not line.strip():
             continue

@@ -1,39 +1,42 @@
 #!/usr/bin/env python3
 """
-Anki через AnkiConnect: заповнення карток TTS-аудіо і збирання аудіо для
-прослуховування з уже створених нот.
+Anki through AnkiConnect: filling cards with TTS audio and building audio for
+listening out of notes that already exist.
 
-Використання:
+Usage:
     uv run anki-tts-filler cards <preset>
     uv run anki-tts-filler audio '<query>'
     uv run anki-tts-filler pdf '<query>'
 
-Anki має бути запущений з увімкненим аддоном AnkiConnect. Схема полів (яка
-колода/notetype, які поля цільової мови/перекладу/аудіо) задається спільно
-для всіх режимів у presets/<preset>.toml, голоси й адреса AnkiConnect - у
-settings.toml. Конкретних мов у коді немає: сторони називаються target
-(мова, яку вчать) і native (мова, якою знають).
+Anki has to be running with the AnkiConnect add-on enabled. The field schema
+(which deck/notetype, which fields hold the target language, the translation
+and the audio) is shared by every mode in presets/<preset>.toml, while the
+voices and the AnkiConnect address live in settings.toml. No specific language
+appears in the code: the sides are called target (the language being learnt)
+and native (the language already known).
 
-Режим cards: список карток вставляється у cards.txt (у директорії запуску),
-до Anki додаються нові ноти. Теги - рядком "tags: a b" у картці або
-прапорцем --tag.
+cards mode: the card list is pasted into cards.txt (in the launch directory)
+and new notes are added to Anki. Tags come from a "tags: a b" line in a card
+or from the --tag flag.
 
-Режим audio: query - Anki-запит (той самий синтаксис, що й у Навігаторі,
-напр. tag:no\\_familie або deck:language-no); з нот, що підійшли під запит,
-клеїться один mp3 (цільова мова -> пауза -> переклад -> пауза -> цільова
-мова ще раз). Налаштування голосів і пауз - у settings.toml.
+audio mode: query is an Anki query (the same syntax as in the Browser, for
+example tag:no\\_familie or deck:language-no); out of the notes it matched, one
+mp3 is glued together (target language -> gap -> translation -> gap -> target
+language again). Voice and gap settings live in settings.toml.
 
-Режим pdf: та сама вибірка, що й audio, але на друк - кожне поле картки
-окремим рядком.
+pdf mode: the same selection as audio, but for printing - every card field on
+its own line.
 
-Режим mirror: дублікати нот у нотетайп зворотного напрямку - пара полів із
-[mirror] пресету міняється місцями. Ціль задається так само, як у resync.
+mirror mode: note duplicates in a reverse-direction notetype - the field pair
+from the preset [mirror] section is swapped. The target is given the same way
+as in resync.
 
-Режим resync: аргумент - назва пресету (усі ноти його нотетайпу) або той
-самий Anki-запит, що й у audio/pdf; без аргументу друкується перелік
-пресетів. Аудіополя з [cards] пресету переозвучуються за поточним текстом
-відповідних полів уже існуючих нот - для картки, яку відредагували вручну
-після створення. Від resync.confirm_from нот питає підтвердження.
+resync mode: the argument is a preset name (every note of its notetype) or the
+same Anki query as in audio/pdf; with no argument the list of presets is
+printed. The audio fields from the preset [cards] section are re-synthesised
+from the current text of the matching fields of notes that already exist - for
+a card edited by hand after it was created. From resync.confirm_from notes on
+it asks for confirmation.
 
 """
 
@@ -88,7 +91,7 @@ def connect(url):
 
 
 def parse_cards_args(rest):
-    """Аргументи режиму cards -> (позиційні, теги з --tag)."""
+    """Arguments of the cards mode -> (positional ones, tags from ``--tag``)."""
     positional = []
     tags = []
     index = 0
@@ -117,7 +120,7 @@ def require_query(rest, mode):
 
 
 def resolve_preset(rest):
-    # Без аргументу список доступних пресетів, бо схема полів більше не одна на проєкт
+    # With no argument, list the available presets: the field schema is no longer one per project
     names = config.list_presets()
     if not names:
         path = config.create_template()
@@ -156,9 +159,10 @@ def read_cards(input_path):
 
 
 def load_settings_or_exit():
-    # Налаштування спільні для всіх режимів, тому й створюються однаково.
-    # Шлях абсолютний: файл читається з директорії запуску, і без повного
-    # шляху не видно, що запуск не з того каталогу створив ще один шаблон
+    # Settings are shared by every mode, so they are created the same way.
+    # The path is absolute: the file is read from the launch directory, and
+    # without the full path it is invisible that a run from the wrong directory
+    # created another template
     if not os.path.exists(config.SETTINGS_FILE):
         config.write_settings_template()
         print(f'Створено {os.path.abspath(config.SETTINGS_FILE)}. Налаштування потрібно перевірити і запустити скрипт повторно.')
@@ -167,7 +171,7 @@ def load_settings_or_exit():
 
 
 def card_texts(valid, preset):
-    """Тексти всіх полів, з яких треба згенерувати аудіо для нових карток."""
+    """Texts of every field that audio has to be generated from for the new cards."""
     texts = set()
     for _, card, _ in valid:
         for src in set(preset.cards.values()):
@@ -191,20 +195,20 @@ def main_cards(rest):
         print('Не знайдено ffmpeg – він потрібен для обрізання тиші в згенерованому аудіо.')
         sys.exit(1)
 
-    # Anki створює відсутню колоду мовчки, тож пресет із незаповненим
-    # deck_name інакше насипав би нот у новостворену "MyDeck::MySubdeck"
+    # Anki creates a missing deck silently, so a preset with an unfilled
+    # deck_name would otherwise pour notes into a freshly made "MyDeck::MySubdeck"
     if preset.deck_name not in client.call('deckNames'):
         print(f'Колоди "{preset.deck_name}" немає в Anki – треба або створити її, або виправити deck_name у presets/{preset.name}.toml.')
         sys.exit(1)
 
     model_fields = client.call('modelFieldNames', modelName=preset.model_name)
-    # Одруківка в назві поля інакше тихо лишила б поле порожнім у всіх нових нотах
+    # A typo in a field name would otherwise leave that field empty in every new note
     missing = config.missing_fields(preset, model_fields, 'cards')
     if missing:
         print(f'presets/{preset.name}.toml: нотетайп {preset.model_name} не має полів: {", ".join(missing)}')
         sys.exit(1)
 
-    # Поля, що вводяться вручну в cards.txt – усі поля нотетайпу, крім згенерованих аудіополів
+    # Fields typed by hand in cards.txt - every notetype field except the generated audio ones
     text_fields = [f for f in model_fields if f not in preset.cards]
 
     input_path = os.path.abspath(config.INPUT_FILE)
@@ -245,20 +249,20 @@ def main_cards(rest):
             'deckName': preset.deck_name,
             'modelName': preset.model_name,
             'fields': build_fields(card, audio_tags),
-            # Теги з --tag дістаються всім карткам запуску, з рядка "tags:" – своїй
+            # Tags from ``--tag`` go to every card of the run, those from a "tags:" line to their own
             'tags': sorted(set(cli_tags) | set(tags)),
         })
 
-    # Дублікати й інші відмови визначаються до додавання, з причиною по кожній нотатці
+    # Duplicates and other refusals are determined before adding, with a reason per note
     checks = client.call('canAddNotesWithErrorDetail', notes=notes)
-    # Anki порівнює дублікати за першим полем нотетайпу, за ним же ловляться повтори всередині cards.txt
+    # Anki compares duplicates by the first notetype field; repeats inside cards.txt are caught by it too
     first_field = model_fields[0]
 
     ok = 0
     duplicate = 0
     seen = set()
-    # Рядки збираються наперед, щоб вивід лишився в порядку карток,
-    # хоча самі ноти додаються одним запитом у кінці
+    # Lines are collected up front so the output stays in card order, even
+    # though the notes themselves are added in one request at the end
     lines = []
     to_add = []
     for (i, card, _), note, check in zip(valid, notes, checks):
@@ -303,7 +307,7 @@ def main_cards(rest):
 def main_audio(rest):
     query = require_query(rest, 'audio')
 
-    # Налаштування читаються до підключення: адреса AnkiConnect береться з них
+    # Settings are read before connecting: the AnkiConnect address comes from them
     settings = load_settings_or_exit()
     client = connect(settings.anki_url)
 
@@ -313,7 +317,7 @@ def main_audio(rest):
 
 
 def read_draft():
-    """Сирий список із draft.txt."""
+    """The raw list from draft.txt."""
     path = os.path.abspath(config.DRAFT_FILE)
     if not os.path.isfile(path):
         open(path, 'w').close()
@@ -336,8 +340,8 @@ def main_draft(rest):
         print(f'Пресет {draft.PRESET_NAME} не знайдено в presets/.')
         sys.exit(1)
 
-    # Anki тут не потрібен: режим лише переписує текстовий файл, а назви
-    # полів усе одно звіряються з нотетайпом при запуску cards
+    # Anki is not needed here: the mode only rewrites a text file, and field
+    # names are checked against the notetype on the cards run anyway
     raw = read_draft()
     cards, problems = draft.generate(raw)
 
@@ -360,10 +364,10 @@ def main_draft(rest):
 
 
 def resolve_target(rest, mode):
-    """Аргумент режимів resync і mirror: назва пресету або Anki-запит.
+    """The argument of the resync and mirror modes: a preset name or an Anki query.
 
-    Без аргументу друкується перелік пресетів - так само, як це робить cards
-    з назвою пресету.
+    With no argument the list of presets is printed - the same way cards does
+    with a preset name.
     """
     if rest:
         return rest[0]
@@ -419,8 +423,8 @@ def main():
 
     mode = sys.argv[1]
     rest = sys.argv[2:]
-    # Очікувані відмови (помилка в settings.toml або пресеті, немає ffmpeg,
-    # збій edge-tts, обрив звʼязку з Anki) друкуються рядком, а не трейсбеком
+    # Expected failures (an error in settings.toml or a preset, no ffmpeg, an
+    # edge-tts failure, a lost AnkiConnect link) print as a line, not a traceback
     try:
         if mode == 'cards':
             main_cards(rest)
