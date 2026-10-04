@@ -1,4 +1,4 @@
-"""Пресети й settings.toml: те, що має впасти помилкою, а не пройти мовчки."""
+"""Presets and settings.toml: what has to fail with an error instead of passing."""
 
 import os
 import tempfile
@@ -51,8 +51,8 @@ fields = ["one", "translation"]
         self.assertEqual(preset.media_fields(), {'one': 'audio_one'})
 
     def test_template_is_valid(self):
-        # create_template() пише цей текст користувачеві як зразок: якщо він
-        # не парситься, перший же запуск падає на щойно створеному файлі
+        # create_template() writes this text out as a sample: if it does not parse,
+        # the very first run fails on the file it just created
         self.write('example', config.PRESET_TEMPLATE)
         preset = config.load_preset('example')
         self.assertEqual(preset.model_name, 'MyNoteType')
@@ -118,7 +118,7 @@ fields = ["one", "note"]
         preset = config.load_preset('m')
         self.assertEqual(preset.mode_fields('cards'), {'audio_one', 'one'})
         self.assertEqual(preset.mode_fields('pdf'), {'one', 'note'})
-        # audio додає аудіополе, щоб знайшовся готовий [sound:...]
+        # audio adds the audio field so a ready [sound:...] can be found
         self.assertEqual(preset.mode_fields('audio'), {'one', 'uk', 'audio_one'})
         self.assertEqual(config.missing_fields(preset, ['one', 'uk'], 'audio'), ['audio_one'])
         self.assertEqual(config.missing_fields(preset, ['one', 'uk', 'audio_one'], 'audio'), [])

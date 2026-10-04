@@ -1,4 +1,4 @@
-"""Ноти Anki -> картки: чищення HTML, пари прикладів, абетка, порядок."""
+"""Anki notes -> cards: HTML cleanup, example pairs, the alphabet, ordering."""
 
 import unittest
 
@@ -70,7 +70,7 @@ class SortKeyTest(unittest.TestCase):
         )
 
     def test_letter_order_follows_config(self):
-        # Інша мова - інший хвіст абетки, і сортування йде за ним
+        # Another language means another alphabet tail, and sorting follows it
         language = config.LanguageConfig(sort_prefixes=['il ', 'la '], sort_extra_letters=['ä', 'ö'])
         words = ['öl', 'äpple', 'bil']
         self.assertEqual(
@@ -98,7 +98,7 @@ class ApplyOrderTest(unittest.TestCase):
             ('lin2', config.ORDER_LINEAR, 'aaa'),
             ('a', config.ORDER_SORTED, 'a'),
         ]
-        # лінійні лишились на місцях 0 і 2, впорядковані помінялись між 1 і 3
+        # the linear ones stayed at 0 and 2, the sorted ones swapped between 1 and 3
         self.assertEqual(
             note_cards.apply_order(entries, self.language),
             ['lin1', 'a', 'lin2', 'c'],

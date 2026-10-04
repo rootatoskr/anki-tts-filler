@@ -1,4 +1,4 @@
-"""Складання доріжки: імʼя файлу, паузи між сторонами, плоска послідовність."""
+"""Building the track: file name, gaps between sides, the flat sequence."""
 
 import unittest
 
@@ -52,7 +52,7 @@ class SideGapsTest(unittest.TestCase):
 
     def test_repeats_use_their_own_gap(self):
         order = [config.LANG_TARGET, config.LANG_NATIVE] + [config.LANG_TARGET] * 3
-        # after_target тільки перед перекладом; між повторами - between_repeats
+        # after_target only before the translation; between repeats it is between_repeats
         self.assertEqual(audio_build.side_gaps(order, self.gap), [2.0, 0.4, 0.3, 0.3])
 
     def test_no_repeat_at_all(self):
@@ -102,7 +102,7 @@ class OrderCardsTest(unittest.TestCase):
             cards, {'M': config.ORDER_SORTED}, config.LanguageConfig(),
         )
         texts = [item.sides[config.LANG_TARGET][0].text for item in ordered]
-        # "en bok" -> "bok" стоїть перед "zebra", приклад лишається за своєю нотою
+        # "en bok" -> "bok" sorts before "zebra", the example stays with its own note
         self.assertEqual(texts, ['en bok', 'zebra', 'zebra example'])
 
 

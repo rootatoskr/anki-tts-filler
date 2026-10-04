@@ -1,4 +1,4 @@
-"""resync: звідки береться ціль і які поля потрапляють у план."""
+"""resync: where the target comes from and which fields end up in the plan."""
 
 import unittest
 
@@ -14,7 +14,7 @@ def note(nid, model, **fields):
 
 
 class FakeClient:
-    """Мінімальний AnkiConnect: віддає те, що поклали, і пише запити."""
+    """A minimal AnkiConnect: returns what was put in and records the requests."""
 
     def __init__(self, found=()):
         self.found = list(found)
@@ -46,7 +46,7 @@ class EscapeQueryValueTest(unittest.TestCase):
         self.assertEqual(resync.escape_query_value('Norwegian Bokmål'), '"Norwegian Bokmål"')
 
     def test_wildcards_and_colon_escaped(self):
-        # _ і * у пошуку Anki - шаблони, : розділяє поле й значення
+        # _ and * are wildcards in Anki search, : separates field and value
         self.assertEqual(resync.escape_query_value('a_b*c:d'), '"a\\_b\\*c\\:d"')
 
     def test_backslash_escaped_first(self):
@@ -95,7 +95,7 @@ class BuildPlanTest(unittest.TestCase):
     def test_stale_field_planned(self):
         plan = self.plan([note(1, 'M', front='en bok', audio='[sound:langdeck_old.mp3]')])
         self.assertEqual(len(plan), 1)
-        # у плані лишається текст: тег візьметься з фактично озвученого файлу
+        # the plan keeps the text: the tag comes from the file actually synthesised
         self.assertEqual(plan[0][1], {'audio': 'en bok'})
 
     def test_matching_field_not_planned(self):
@@ -114,8 +114,8 @@ class BuildPlanTest(unittest.TestCase):
         self.assertEqual(self.plan([note(1, 'M', front='<b>en bok</b>', audio=current)]), [])
 
     def test_nbsp_and_double_space_normalized(self):
-        # Те саме чищення, що в режимі audio: інакше той самий текст дав би
-        # два різних файли
+        # The same cleanup as in the audio mode: otherwise the same text would
+        # produce two different files
         current = self.expected('en bok')
         self.assertEqual(self.plan([note(1, 'M', front='en\u00a0bok', audio=current)]), [])
         self.assertEqual(self.plan([note(1, 'M', front='en  bok', audio=current)]), [])

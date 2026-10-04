@@ -1,4 +1,4 @@
-"""mirror: які поля потрапляють у дублікат і як обирається ціль."""
+"""mirror: which fields end up in the duplicate and how the target is chosen."""
 
 import unittest
 
@@ -59,8 +59,8 @@ class MirroredFieldsTest(unittest.TestCase):
     def test_other_fields_copied(self):
         out = mirror.mirrored_fields(self.note, ['production', 'recognition'], self.fields)
         self.assertEqual(out['note'], 'примітка')
-        # аудіо копіюється як є: імʼя файлу - відпечаток тексту, а текст
-        # просто переїхав у інше поле
+        # the audio is copied as is: the file name is a fingerprint of the text,
+        # and the text has merely moved to another field
         self.assertEqual(out['audio'], '[sound:langdeck_x.mp3]')
 
     def test_only_fields_of_target_notetype(self):
@@ -113,7 +113,7 @@ class BuildNotesTest(unittest.TestCase):
 
 
 class SelectAddableTest(unittest.TestCase):
-    """canAddNotes звіряє з колекцією, але не з рештою того самого запиту."""
+    """canAddNotes checks against the collection but not against the rest of the same request."""
 
     FIRST = {'M-rev': 'production'}
 

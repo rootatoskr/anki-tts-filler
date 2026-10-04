@@ -1,4 +1,4 @@
-"""cards.txt -> поля й теги."""
+"""cards.txt -> fields and tags."""
 
 import unittest
 
@@ -37,7 +37,7 @@ class SplitCardsTest(unittest.TestCase):
         self.assertNotIn('tags', card)
 
     def test_tags_field_in_notetype_wins(self):
-        # Нотетайп із власним полем "tags": рядок лишається полем, а не тегами
+        # A notetype with its own "tags" field: the line stays a field, not tags
         fields = FIELDS + ['tags']
         card, tags, error = parser.split_cards('tags: текст поля\n', fields)[0]
         self.assertIsNone(error)

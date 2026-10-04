@@ -1,4 +1,4 @@
-"""Режим draft: межа латиниця/кирилиця, тире, дужки, числівники, регістр і крапки."""
+"""The draft mode: Latin/Cyrillic boundary, dashes, parentheses, numerals, case and dots."""
 
 import unittest
 
@@ -34,7 +34,7 @@ class SplitLineTest(unittest.TestCase):
         self.assertEqual(card['recognition'], 'en e-post')
 
     def test_only_sentence_start_lowercased(self):
-        # власна назва в середині речення лишається як була
+        # a proper name in the middle of a sentence stays as it was
         self.assertEqual(
             self.split('Jeg bor i Oslo Я живу в Осло'),
             {'recognition': 'jeg bor i Oslo', 'production': 'я живу в Осло'},
@@ -71,14 +71,14 @@ class SplitLineTest(unittest.TestCase):
         self.assertEqual(self.split('Så bra! Як добре!')['production'], 'як добре!')
 
     def test_trailing_dot_removed_before_number_split(self):
-        # крапка в кінці не має заважати регулярці хвоста рядка
+        # a trailing dot must not get in the way of the line-tail regex
         self.assertEqual(
             self.split('førti 40.'),
             {'recognition': 'førti', 'production': '40'},
         )
 
     def test_trailing_dot_removed_after_note_taken_out(self):
-        # крапка стоїть перед ремаркою, тож знімається вже з готового значення
+        # the dot sits before the remark, so it is removed from the finished value
         card = self.split('en kokk кухар. ((професія))')
         self.assertEqual(card['note'], 'професія')
         self.assertEqual(card['production'], 'кухар')
