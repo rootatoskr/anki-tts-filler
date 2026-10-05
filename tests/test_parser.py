@@ -56,3 +56,43 @@ class SplitCardsTest(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class CliTagsTest(unittest.TestCase):
+    """``--tag`` in the cards and mirror modes: how many words it takes."""
+
+    def parse(self, argv):
+        from anki_tts_filler.main import parse_cards_args
+        return parse_cards_args(argv, 'cards')
+
+    def test_several_tags_after_one_flag(self):
+        self.assertEqual(
+            self.parse(['base', '--tag', 'no_kapittel_5', 'no_del_2']),
+            (['base'], ['no_kapittel_5', 'no_del_2']),
+        )
+
+    def test_repeated_flag_still_works(self):
+        self.assertEqual(self.parse(['base', '--tag', 'a', '--tag', 'b']), (['base'], ['a', 'b']))
+
+    def test_mixed_forms_accumulate(self):
+        self.assertEqual(
+            self.parse(['base', '--tag', 'a', 'b', '--tag', 'c']),
+            (['base'], ['a', 'b', 'c']),
+        )
+
+    def test_no_tags_at_all(self):
+        self.assertEqual(self.parse(['base']), (['base'], []))
+
+    def test_greedy_flag_swallows_a_later_target(self):
+        # The documented cost of the greedy form: the target has to come first
+        self.assertEqual(self.parse(['--tag', 'a', 'b', 'base']), ([], ['a', 'b', 'base']))
+
+    def test_extra_positional_rejected(self):
+        import contextlib
+        import io
+        from anki_tts_filler.main import single_target
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            with self.assertRaises(SystemExit):
+                single_target(['base', 'no_del_2'], 'cards')
+        self.assertIn('no_del_2', out.getvalue())
+        self.assertEqual(single_target(['base'], 'cards'), ['base'])

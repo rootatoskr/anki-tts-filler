@@ -17,7 +17,7 @@ and native (the language already known).
 
 cards mode: the card list is pasted into cards.txt (in the launch directory)
 and new notes are added to Anki. Tags come from a "tags: a b" line in a card
-or from the --tag flag.
+or from the --tag flag, which takes every word up to the next flag.
 
 audio mode: query is an Anki query (the same syntax as in the Browser, for
 example tag:no\\_familie or deck:language-no); out of the notes it matched, one
@@ -69,7 +69,7 @@ def usage():
     print('  anki draft')
     print()
     print('Приклади:')
-    print('  anki cards base --tag no_fargene --tag kapittel_9')
+    print('  anki cards base --tag no_fargene kapittel_9')
     print("  anki audio 'tag:no\\_fargene'")
     print("  anki pdf 'deck:language-no::no-verb'")
     print('  anki resync base')
@@ -90,8 +90,14 @@ def connect(url):
     return client
 
 
-def parse_cards_args(rest):
-    """Arguments of the cards mode -> (positional ones, tags from ``--tag``)."""
+def parse_cards_args(rest, mode):
+    """Arguments of the cards and mirror modes -> (positional ones, tags).
+
+    ``--tag`` takes every following word up to the next flag, so tags can be
+    written the way Anki itself separates them - by spaces. That makes the flag
+    greedy: a positional argument placed after it is read as one more tag, and
+    the missing target is then reported by the caller.
+    """
     positional = []
     tags = []
     index = 0
@@ -99,17 +105,34 @@ def parse_cards_args(rest):
         item = rest[index]
         if item == '--tag':
             index += 1
-            if index >= len(rest):
+            start = index
+            while index < len(rest) and not rest[index].startswith('-'):
+                tags.append(rest[index])
+                index += 1
+            if index == start:
                 print('Після --tag потрібна назва тегу.')
                 sys.exit(1)
-            tags.append(rest[index])
-        elif item.startswith('-'):
-            print('Невідомий прапорець %s. Використання: anki cards <preset> [--tag <назва>]' % item)
+            continue
+        if item.startswith('-'):
+            print("Невідомий прапорець %s. Використання: anki %s <ціль> [--tag <назва>]..." % (item, mode))
             sys.exit(1)
-        else:
-            positional.append(item)
+        positional.append(item)
         index += 1
     return positional, tags
+
+
+def single_target(positional, mode):
+    """The one positional argument of a mode, with extras reported.
+
+    Without this check a second positional argument was dropped in silence:
+    ``--tag a b`` left ``b`` as a positional, and only the first tag was applied.
+    """
+    if len(positional) > 1:
+        print('Зайвий аргумент %s. Ціль одна, а теги йдуть після --tag: anki %s <ціль> --tag a b' % (
+            positional[1], mode,
+        ))
+        sys.exit(1)
+    return positional
 
 
 def require_query(rest, mode):
@@ -186,8 +209,8 @@ def card_label(card, text_fields):
 
 
 def main_cards(rest):
-    positional, cli_tags = parse_cards_args(rest)
-    preset = resolve_preset(positional)
+    positional, cli_tags = parse_cards_args(rest, 'cards')
+    preset = resolve_preset(single_target(positional, 'cards'))
     settings = load_settings_or_exit()
     client = connect(settings.anki_url)
 
@@ -396,8 +419,8 @@ def main_resync(rest):
 
 
 def main_mirror(rest):
-    positional, cli_tags = parse_cards_args(rest)
-    query = resolve_target(positional, 'mirror')
+    positional, cli_tags = parse_cards_args(rest, 'mirror')
+    query = resolve_target(single_target(positional, 'mirror'), 'mirror')
 
     settings = load_settings_or_exit()
     client = connect(settings.anki_url)
