@@ -1,4 +1,4 @@
-"""A cards.txt draft from a list of "Latin + Cyrillic on one line".
+"""A cards.txt draft from a list of "Latin + Cyrillic on one line" (in either order).
 
 The content is taken as is, with four mechanical fixes: the first letter of
 every sentence is lowercased (case in note is left alone), a dot at the end of
@@ -22,6 +22,9 @@ FIELDS = (SOURCE_FIELD, TARGET_FIELD, NOTE_FIELD)
 PRESET_NAME = 'base'
 
 CYRILLIC_CHAR_RE = re.compile(r'[Ѐ-ӿ]')
+# Latin including the extended letters (æ, ø, å and the like)
+LATIN_CHAR_RE = re.compile(r'[A-Za-zÀ-ɏ]')
+LETTER_RE = re.compile(r'[^\W\d_]')
 WS_RE = re.compile(r'\s+')
 _DASHES = '-‐‑‒–—―'
 # A dash becomes " – " (en dash, one space on each side) even where there was
@@ -114,6 +117,16 @@ def split_line(line):
         if not recognition:
             return None, 'немає латинської (норвезької) частини'
         return make_card(recognition, number.group(1).strip(), note_raw), None
+
+    # The translation may come first ("ми з радістю vi gjerne"): then the line
+    # is split at the first Latin letter after the Cyrillic part instead
+    if LETTER_RE.search(body).start() == cyr_match.start():
+        lat_match = LATIN_CHAR_RE.search(body, cyr_match.start())
+        if not lat_match:
+            return None, 'немає латинської (норвезької) частини'
+        production = TRAILING_DASH_RE.sub('', body[:lat_match.start()].rstrip())
+        recognition = body[lat_match.start():].strip()
+        return make_card(recognition, production, note_raw), None
 
     recognition = TRAILING_DASH_RE.sub('', body[:cyr_match.start()].rstrip())
     production = body[cyr_match.start():].strip()
