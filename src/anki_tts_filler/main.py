@@ -35,8 +35,7 @@ resync mode: the argument is a preset name (every note of its notetype) or the
 same Anki query as in audio/pdf; with no argument the list of presets is
 printed. The audio fields from the preset [cards] section are re-synthesised
 from the current text of the matching fields of notes that already exist - for
-a card edited by hand after it was created. From resync.confirm_from notes on
-it asks for confirmation.
+a card edited by hand after it was created.
 
 """
 

@@ -121,13 +121,6 @@ between_cards = 1.5
 repeat_target = 1
 use_anki_media = true
 
-[resync]
-# Від скількох нот режим resync питає підтвердження. Типовий випадок -
-# виправив одну картку і переозвучив її; більша кількість майже завжди
-# означає, що запит вийшов ширшим, ніж хотілося. Величезне число вимикає
-# запитання.
-confirm_from = 5
-
 [output]
 dir = "out"
 bitrate = "48k"
@@ -194,12 +187,6 @@ class ContentConfig:
 
 
 @dataclass
-class ResyncConfig:
-    # From how many notes on to ask for confirmation before writing
-    confirm_from: int = 5
-
-
-@dataclass
 class OutputConfig:
     dir: str = 'out'
     bitrate: str = '48k'
@@ -215,7 +202,6 @@ class Settings:
     language: LanguageConfig = field(default_factory=LanguageConfig)
     gap: GapConfig = field(default_factory=GapConfig)
     content: ContentConfig = field(default_factory=ContentConfig)
-    resync: ResyncConfig = field(default_factory=ResyncConfig)
     output: OutputConfig = field(default_factory=OutputConfig)
 
 
@@ -290,8 +276,6 @@ def load_settings(path=None):
         raise SettingsError('content.repeat_target має бути >= 0')
     if settings.concurrency < 1:
         raise SettingsError('concurrency має бути >= 1')
-    if settings.resync.confirm_from < 1:
-        raise SettingsError('resync.confirm_from має бути >= 1')
     # A negative gap is an error for ffmpeg; zero means "no gap"
     for name in ('after_target', 'after_native', 'within_side', 'between_repeats', 'between_cards'):
         if getattr(settings.gap, name) < 0:

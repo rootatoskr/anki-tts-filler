@@ -14,7 +14,6 @@ from that plan synthesised: comparing a file name needs no synthesis.
 """
 
 import os
-import sys
 
 from . import config
 from .audio import cache_path, expected_tag, ffmpeg_available, sound_tag, sync_media
@@ -88,25 +87,6 @@ def describe(plan, index):
     return lines
 
 
-def confirm(plan, index):
-    """Asks for confirmation before writing to many notes.
-
-    With no terminal there is nowhere to get an answer, so it counts as a
-    refusal: otherwise a run from a script would re-synthesise everything
-    silently.
-    """
-    fields = sum(len(changes) for _, changes in plan)
-    print('зміниться нот: %d (аудіополів: %d)' % (len(plan), fields))
-    for line in describe(plan, index):
-        print(line)
-    if not sys.stdin.isatty():
-        # Without a flush the stderr line jumps ahead of the plan just printed
-        sys.stdout.flush()
-        print('це більше за resync.confirm_from, а підтвердити ніде - звузь запит', file=sys.stderr)
-        return False
-    return input('переозвучити? [y/N] ').strip().lower() in ('y', 'yes')
-
-
 def run(query, settings, client):
     if not ffmpeg_available():
         raise ResyncError('не знайдено ffmpeg – він потрібен для обрізання тиші в згенерованому аудіо')
@@ -147,9 +127,10 @@ def run(query, settings, client):
         print('оновлено: 0 | без змін: %d' % len(candidates))
         return True
 
-    if len(plan) >= settings.resync.confirm_from and not confirm(plan, index):
-        print('скасовано')
-        return False
+    fields = sum(len(changes) for _, changes in plan)
+    print('зміниться нот: %d (аудіополів: %d)' % (len(plan), fields))
+    for line in describe(plan, index):
+        print(line)
 
     cache_dir = cache_path()
     os.makedirs(cache_dir, exist_ok=True)
