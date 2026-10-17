@@ -5,7 +5,7 @@ description = "Заповнення нотаток в Anki через AnkiConnec
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "edge-tts>=7.2.8",
+    "edge-tts>=7.3.1",
 ]
 
 [project.scripts]
