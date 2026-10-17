@@ -114,24 +114,6 @@ def select_addable(prepared, checks, first_fields):
     return fresh, duplicate, repeated, rejected
 
 
-def confirm(prepared, swap_by_model):
-    """Asks for confirmation: mirror creates notes, and undoing that is harder than an edit."""
-    print('буде створено нот: %d' % len(prepared))
-    for note, prepared_note in prepared[:5]:
-        first = swap_by_model[note['modelName']][0]
-        print('  %s -> %s' % (
-            note_value(note, first)[:40] or '(порожньо)',
-            prepared_note['fields'].get(first, '')[:40] or '(порожньо)',
-        ))
-    if len(prepared) > 5:
-        print('  ... ще %d' % (len(prepared) - 5))
-    if not sys.stdin.isatty():
-        sys.stdout.flush()
-        print('підтвердити ніде - запусти в терміналі', file=sys.stderr)
-        return False
-    return input('створити? [y/N] ').strip().lower() in ('y', 'yes')
-
-
 def run(target, settings, client, extra_tags):
     presets = config.load_all_presets()
     by_name = {preset.name: preset for preset in presets}
@@ -201,11 +183,6 @@ def run(target, settings, client, extra_tags):
     if not fresh:
         print('створювати нема чого')
         return True
-
-    swap_by_model = {preset.model_name: preset.mirror_swap for preset in sources.values()}
-    if not confirm(fresh, swap_by_model):
-        print('скасовано')
-        return False
 
     added = client.call('addNotes', notes=[item for _, item in fresh])
     created = sum(1 for note_id in added if note_id is not None)
