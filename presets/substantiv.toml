@@ -3,17 +3,17 @@ model_name = "type-language-no-substantiv"
 
 [cards]
 audio_substantiv = "substantiv"
-audio_bestemt_ental = "bestemt_ental"
+audio_bestemt_entall = "bestemt_entall"
 audio_ubestemt_flertall = "ubestemt_flertall"
 audio_bestemt_flertall = "bestemt_flertall"
 
 [audio]
 # "linear" - як у Anki, "random" - для фонового слухання, "sorted" - за абеткою
 order = "linear"
-target = ["substantiv", "bestemt_ental", "ubestemt_flertall", "bestemt_flertall"]
+target = ["substantiv", "bestemt_entall", "ubestemt_flertall", "bestemt_flertall"]
 native = ["substantiv_uk"]
 
 [pdf]
 # шпаргалку зручніше читати за абеткою першого рядка
 order = "sorted"
-fields = ["substantiv", "bestemt_ental", "ubestemt_flertall", "bestemt_flertall", "substantiv_uk", "note"]
+fields = ["substantiv", "bestemt_entall", "ubestemt_flertall", "bestemt_flertall", "substantiv_uk", "note"]
