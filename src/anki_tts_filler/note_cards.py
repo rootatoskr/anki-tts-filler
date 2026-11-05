@@ -19,6 +19,8 @@ SOUND_RE = re.compile(r'\[sound:([^\]]+)\]')
 CLOZE_RE = re.compile(r'\{\{c\d+::(.*?)(?:::[^}]*?)?\}\}')
 NBSP_RE = re.compile(r'[ ​]')
 WS_RE = re.compile(r'\s+')
+LETTER_RE = re.compile(r'[^\W\d_]')
+LATIN_LETTER_RE = re.compile(r'[A-Za-zÀ-ɏ]')
 # An inline tag inside a sentence leaves a space behind ("du <b>fra</b>?" ->
 # "du fra ?"). An ellipsis with a space before it is written on purpose, so a
 # run of dots is left alone.
@@ -84,6 +86,16 @@ def clean_text(raw):
     text = NBSP_RE.sub(' ', text)
     text = WS_RE.sub(' ', text).strip()
     return SPACE_PUNCT_RE.sub(r'\1', text)
+
+
+# Текст для озвучення: лише латиниця (разом з æ, ø, å тощо), цифри й символи.
+# Поле з будь-якою іншою літерою (наприклад кирилицею) вважається порожнім,
+# тож аудіо для нього не створюється, а наявне очищається
+def tts_text(raw):
+    text = clean_text(raw)
+    if all(LATIN_LETTER_RE.match(char) for char in LETTER_RE.findall(text)):
+        return text
+    return ''
 
 
 def media_name(raw):

@@ -46,7 +46,7 @@ import os
 from . import config, audio_build, draft, mirror, pdf_build, resync
 from .parser import split_cards, build_fields
 from .audio import cache_path, sound_tag, ffmpeg_available, sync_media
-from .note_cards import clean_text
+from .note_cards import tts_text
 from .ankiconnect import AnkiConnect, AnkiConnectError
 from .audio_build import AudioError
 from .mirror import MirrorError
@@ -197,7 +197,7 @@ def card_texts(valid, preset):
     texts = set()
     for _, card, _ in valid:
         for src in set(preset.cards.values()):
-            text = clean_text(card.get(src, ''))
+            text = tts_text(card.get(src, ''))
             if text:
                 texts.add(text)
     return texts
@@ -265,7 +265,7 @@ def main_cards(rest):
     for _, card, tags in valid:
         audio_tags = {}
         for audio_field, src in preset.cards.items():
-            src_text = clean_text(card.get(src, ''))
+            src_text = tts_text(card.get(src, ''))
             audio_tags[audio_field] = sound_tag(audio_map[src_text]) if src_text else ''
         notes.append({
             'deckName': preset.deck_name,

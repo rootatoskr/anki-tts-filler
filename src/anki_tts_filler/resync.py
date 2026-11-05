@@ -17,7 +17,7 @@ import os
 
 from . import config
 from .audio import cache_path, expected_tag, ffmpeg_available, sound_tag, sync_media
-from .note_cards import clean_text, note_value
+from .note_cards import clean_text, note_value, tts_text
 
 
 class ResyncError(Exception):
@@ -66,7 +66,7 @@ def build_plan(notes, index, settings):
     for note in notes:
         changes = {}
         for audio_field, text_field in index[note['modelName']].items():
-            text = clean_text(note_value(note, text_field))
+            text = tts_text(note_value(note, text_field))
             new_value = expected_tag(text, settings) if text else ''
             if new_value != note_value(note, audio_field):
                 changes[audio_field] = text
