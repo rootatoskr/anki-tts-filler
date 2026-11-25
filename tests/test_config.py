@@ -1,4 +1,4 @@
-"""Presets and settings.toml: what has to fail with an error instead of passing."""
+"""Схема нот і settings.toml: що має падати з помилкою, а не проходити."""
 
 import os
 import tempfile
@@ -8,172 +8,14 @@ from anki_tts_filler import config
 
 
 class PresetTest(unittest.TestCase):
-    def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        self.cwd = os.getcwd()
-        os.makedirs(os.path.join(self.tmp.name, config.PRESETS_DIR))
-        os.chdir(self.tmp.name)
-
-    def tearDown(self):
-        os.chdir(self.cwd)
-        self.tmp.cleanup()
-
-    def write(self, name, body):
-        path = os.path.join(self.tmp.name, config.PRESETS_DIR, name + '.toml')
-        with open(path, 'w', encoding='utf-8') as handle:
-            handle.write(body)
-
-    def test_full_preset(self):
-        self.write('good', '''deck_name = "D::Sub"
-model_name = "M"
-
-[cards]
-audio_one = "one"
-
-[audio]
-order = "random"
-target = ["one", "two"]
-native = ["translation"]
-examples = "note"
-
-[pdf]
-order = "sorted"
-fields = ["one", "translation"]
-''')
-        preset = config.load_preset('good')
-        self.assertEqual(preset.deck_name, 'D::Sub')
-        self.assertEqual(preset.cards, {'audio_one': 'one'})
-        self.assertEqual(preset.audio_target, ['one', 'two'])
-        self.assertEqual(preset.audio_native, ['translation'])
-        self.assertEqual(preset.audio_examples, 'note')
-        self.assertEqual(preset.audio_order, config.ORDER_RANDOM)
-        self.assertEqual(preset.pdf_order, config.ORDER_SORTED)
-        self.assertEqual(preset.media_fields(), {'one': 'audio_one'})
-
-    def test_template_is_valid(self):
-        # create_template() writes this text out as a sample: if it does not parse,
-        # the very first run fails on the file it just created
-        self.write('example', config.PRESET_TEMPLATE)
-        preset = config.load_preset('example')
-        self.assertEqual(preset.model_name, 'MyNoteType')
-        self.assertEqual(preset.cards, {'audio_field_one': 'field_one'})
-        self.assertEqual(preset.audio_target, ['field_one'])
-        self.assertEqual(preset.audio_native, ['field_translation'])
-        self.assertEqual(preset.pdf_order, config.ORDER_SORTED)
-
-    def test_missing_deck_name_is_preset_error(self):
-        self.write('bad', 'model_name = "M"\n')
-        with self.assertRaises(config.PresetError) as caught:
-            config.load_preset('bad')
-        self.assertIn('deck_name', str(caught.exception))
-
-    def test_missing_model_name_is_preset_error(self):
-        self.write('bad', 'deck_name = "D"\n')
-        with self.assertRaises(config.PresetError):
-            config.load_preset('bad')
-
-    def test_typo_in_top_level_key_rejected(self):
-        self.write('bad', 'deck_name = "D"\nmodel_name = "M"\nmodle_name = "typo"\n')
-        with self.assertRaises(config.PresetError) as caught:
-            config.load_preset('bad')
-        self.assertIn('modle_name', str(caught.exception))
-
-    def test_old_language_keys_report_new_names(self):
-        self.write('old', 'deck_name = "D"\nmodel_name = "M"\n\n[audio]\nno = ["a"]\nuk = ["b"]\n')
-        with self.assertRaises(config.PresetError) as caught:
-            config.load_preset('old')
-        self.assertIn('no -> audio.target', str(caught.exception))
-
-    def test_unknown_audio_key_rejected(self):
-        self.write('bad', 'deck_name = "D"\nmodel_name = "M"\n\n[audio]\ntarget = ["a"]\nwat = 1\n')
-        with self.assertRaises(config.PresetError) as caught:
-            config.load_preset('bad')
-        self.assertIn('wat', str(caught.exception))
-
-    def test_bad_order_rejected(self):
-        self.write('bad', 'deck_name = "D"\nmodel_name = "M"\n\n[pdf]\norder = "alphabetic"\n')
-        with self.assertRaises(config.PresetError):
-            config.load_preset('bad')
-
-    def test_deck_line_and_markdown_escaping(self):
-        self.write('esc', 'deck: language-no::no\\_verb\nmodel_name = "type\\_m"\n')
-        preset = config.load_preset('esc')
-        self.assertEqual(preset.deck_name, 'language-no::no_verb')
-        self.assertEqual(preset.model_name, 'type_m')
-
     def test_mode_fields_and_missing(self):
-        self.write('m', '''deck_name = "D"
-model_name = "M"
-
-[cards]
-audio_one = "one"
-
-[audio]
-target = ["one"]
-native = ["uk"]
-
-[pdf]
-fields = ["one", "note"]
-''')
-        preset = config.load_preset('m')
+        preset = config.Preset('D', 'M', {'audio_one': 'one'}, ['one'], ['uk'], ['one', 'note'])
         self.assertEqual(preset.mode_fields('cards'), {'audio_one', 'one'})
         self.assertEqual(preset.mode_fields('pdf'), {'one', 'note'})
         # audio adds the audio field so a ready [sound:...] can be found
         self.assertEqual(preset.mode_fields('audio'), {'one', 'uk', 'audio_one'})
         self.assertEqual(config.missing_fields(preset, ['one', 'uk'], 'audio'), ['audio_one'])
         self.assertEqual(config.missing_fields(preset, ['one', 'uk', 'audio_one'], 'audio'), [])
-
-    def test_mirror_section(self):
-        self.write('m', '''deck_name = "D"
-model_name = "M"
-
-[mirror]
-preset = "m-rev"
-swap = ["a", "b"]
-''')
-        preset = config.load_preset('m')
-        self.assertEqual(preset.mirror_preset, 'm-rev')
-        self.assertEqual(preset.mirror_swap, ['a', 'b'])
-        self.assertEqual(preset.mode_fields('mirror'), {'a', 'b'})
-
-    def test_no_mirror_section_means_empty(self):
-        self.write('m', 'deck_name = "D"\nmodel_name = "M"\n')
-        preset = config.load_preset('m')
-        self.assertEqual(preset.mirror_preset, '')
-        self.assertEqual(preset.mirror_swap, [])
-
-    def test_mirror_swap_must_be_a_pair(self):
-        for swap in ('["a"]', '["a", "b", "c"]', '["a", "a"]'):
-            self.write('m', 'deck_name = "D"\nmodel_name = "M"\n\n[mirror]\npreset = "r"\nswap = %s\n' % swap)
-            with self.assertRaises(config.PresetError, msg=swap):
-                config.load_preset('m')
-
-    def test_mirror_preset_required(self):
-        self.write('m', 'deck_name = "D"\nmodel_name = "M"\n\n[mirror]\nswap = ["a", "b"]\n')
-        with self.assertRaises(config.PresetError):
-            config.load_preset('m')
-
-    def test_unknown_mirror_key_rejected(self):
-        self.write('m', 'deck_name = "D"\nmodel_name = "M"\n\n[mirror]\npreset = "r"\nswap = ["a", "b"]\nwat = 1\n')
-        with self.assertRaises(config.PresetError) as caught:
-            config.load_preset('m')
-        self.assertIn('wat', str(caught.exception))
-
-    def test_duplicate_model_name_rejected(self):
-        body = 'deck_name = "D"\nmodel_name = "SAME"\n\n[cards]\naudio = "%s"\n'
-        self.write('aaa', body % 'one')
-        self.write('zzz', body % 'two')
-        with self.assertRaises(config.PresetError) as caught:
-            config.load_all_presets()
-        message = str(caught.exception)
-        self.assertIn('aaa', message)
-        self.assertIn('zzz', message)
-        self.assertIn('SAME', message)
-
-    def test_distinct_model_names_pass(self):
-        self.write('aaa', 'deck_name = "D"\nmodel_name = "A"\n')
-        self.write('zzz', 'deck_name = "D"\nmodel_name = "Z"\n')
-        self.assertEqual([p.model_name for p in config.load_all_presets()], ['A', 'Z'])
 
 
 class SettingsTest(unittest.TestCase):

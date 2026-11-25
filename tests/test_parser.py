@@ -59,7 +59,7 @@ if __name__ == '__main__':
 
 
 class CliTagsTest(unittest.TestCase):
-    """``--tag`` in the cards and mirror modes: how many words it takes."""
+    """``--tag`` in the cards mode: how many words it takes."""
 
     def parse(self, argv):
         from anki_tts_filler.main import parse_cards_args
@@ -84,15 +84,15 @@ class CliTagsTest(unittest.TestCase):
         self.assertEqual(self.parse(['base']), (['base'], []))
 
     def test_greedy_flag_swallows_a_later_target(self):
-        # The documented cost of the greedy form: the target has to come first
+        # The greedy flag takes every following word as a tag
         self.assertEqual(self.parse(['--tag', 'a', 'b', 'base']), ([], ['a', 'b', 'base']))
 
-    def test_extra_positional_rejected(self):
+    def test_positional_rejected(self):
         import contextlib
         import io
-        from anki_tts_filler.main import single_target
+        from anki_tts_filler.main import reject_positional
         with contextlib.redirect_stdout(io.StringIO()) as out:
             with self.assertRaises(SystemExit):
-                single_target(['base', 'no_del_2'], 'cards')
-        self.assertIn('no_del_2', out.getvalue())
-        self.assertEqual(single_target(['base'], 'cards'), ['base'])
+                reject_positional(['base'], 'cards')
+        self.assertIn('base', out.getvalue())
+        reject_positional([], 'cards')

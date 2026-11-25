@@ -25,19 +25,6 @@ class FakeClient:
         return self.found
 
 
-class FakePreset:
-    def __init__(self, name, model_name, cards):
-        self.name = name
-        self.model_name = model_name
-        self.cards = cards
-
-
-PRESETS = [
-    FakePreset('verb', 'type-language-no-verb', {'audio_infinitiv': 'infinitiv'}),
-    FakePreset('tichky', 'Без Аудіо', {}),
-]
-
-
 class EscapeQueryValueTest(unittest.TestCase):
     def test_wraps_in_quotes(self):
         self.assertEqual(resync.escape_query_value('type-language-no-verb'), '"type-language-no-verb"')
@@ -54,28 +41,16 @@ class EscapeQueryValueTest(unittest.TestCase):
 
 
 class ResolveTargetsTest(unittest.TestCase):
-    def test_preset_name_becomes_notetype_query(self):
+    def test_no_query_means_whole_notetype(self):
         client = FakeClient(found=[7, 8])
-        ids, label = resync.resolve_targets(client, 'verb', PRESETS)
+        ids, label = resync.resolve_targets(client, None)
         self.assertEqual(ids, [7, 8])
-        self.assertEqual(client.queries, ['note:"type-language-no-verb"'])
-        self.assertIn('verb', label)
-        self.assertIn('type-language-no-verb', label)
-
-    def test_preset_without_cards_rejected(self):
-        client = FakeClient(found=[1])
-        with self.assertRaises(resync.ResyncError) as caught:
-            resync.resolve_targets(client, 'tichky', PRESETS)
-        self.assertIn('[cards]', str(caught.exception))
-
-    def test_unknown_name_goes_to_anki_as_query(self):
-        client = FakeClient(found=[3])
-        ids, label = resync.resolve_targets(client, 'nid:3', PRESETS)
-        self.assertEqual((ids, label), ([3], 'nid:3'))
+        self.assertEqual(client.queries, ['note:"type-language-no-basic"'])
+        self.assertEqual(label, 'type-language-no-basic')
 
     def test_query_passed_to_anki_verbatim(self):
         client = FakeClient(found=[3])
-        ids, label = resync.resolve_targets(client, 'nid:3', PRESETS)
+        ids, label = resync.resolve_targets(client, 'nid:3')
         self.assertEqual((ids, label), ([3], 'nid:3'))
         self.assertEqual(client.queries, ['nid:3'])
 
