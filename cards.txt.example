@@ -1,6 +1,6 @@
-field_one: значення першого поля
-field_two: значення другого поля
+recognition: en bok
+production: книга
 
-field_one: значення першого поля (друга картка)
-field_two: значення другого поля (друга картка)
+recognition: en bil
+production: машина
 tags: kapittel_4 familie
