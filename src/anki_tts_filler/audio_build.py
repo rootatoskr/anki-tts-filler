@@ -321,7 +321,7 @@ async def run(query, settings, client):
     os.makedirs(settings.output.dir, exist_ok=True)
     os.makedirs(settings.work_dir, exist_ok=True)
     cache = TtsCache(settings.cache_dir, settings.concurrency)
-    presets = config.load_all_presets()
+    presets = [config.PRESET]
     field_map = note_cards.load_field_map(presets)
 
     note_ids = client.find_notes(query)

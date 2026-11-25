@@ -1,13 +1,12 @@
 """Orchestration of the resync mode: re-synthesising audio for existing Anki notes.
 
-The same [cards] preset schema as in the cards mode (audio field -> text
-field). Unlike cards, the text comes not from cards.txt but from the current
-field values of an existing note - which is why the audio and the cache
-(audio_cache/) are the same ones the cards mode uses.
+Поля беруться з ``config.PRESET.cards`` (аудіополе -> текстове поле), як і в
+режимі cards. На відміну від cards, текст береться не з cards.txt, а з
+поточних значень полів наявної ноти - тому аудіо й кеш (audio_cache/) ті самі,
+що й у режимі cards.
 
-The target is given either as a preset name (every note of its notetype) or as
-an Anki query - the same one as in audio/pdf. With no argument the mode prints
-the list of presets, the way cards does.
+Без аргументу ціль - всі ноти типу з ``config.PRESET``, інакше Anki-запит, той
+самий, що й в audio/pdf.
 
 A plan is built first (which fields really change) and only then are the texts
 from that plan synthesised: comparing a file name needs no synthesis.
@@ -37,21 +36,15 @@ def escape_query_value(value):
     return '"%s"' % value
 
 
-def resolve_targets(client, target, presets):
-    """Preset name or Anki query -> (note_ids, label for the output).
+def resolve_targets(client, query):
+    """Anki-запит або None -> (note_ids, підпис для виводу).
 
-    An argument that matches a preset name means every note of its notetype;
-    any other argument goes to Anki as a query.
+    None означає всі ноти типу з ``config.PRESET``.
     """
-    preset = next((item for item in presets if item.name == target), None)
-    if preset is None:
-        return client.find_notes(target), target
-    if not preset.cards:
-        raise ResyncError(
-            'пресет %s не має секції [cards], тобто аудіополів для переозвучення' % target
-        )
-    query = 'note:%s' % escape_query_value(preset.model_name)
-    return client.find_notes(query), 'пресет %s (%s)' % (target, preset.model_name)
+    if query is not None:
+        return client.find_notes(query), query
+    model_name = config.PRESET.model_name
+    return client.find_notes('note:%s' % escape_query_value(model_name)), model_name
 
 
 def build_plan(notes, index, settings):
@@ -91,10 +84,9 @@ def run(query, settings, client):
     if not ffmpeg_available():
         raise ResyncError('не знайдено ffmpeg – він потрібен для обрізання тиші в згенерованому аудіо')
 
-    presets = config.load_all_presets()
-    index = {preset.model_name: preset.cards for preset in presets if preset.cards}
+    index = {config.PRESET.model_name: config.PRESET.cards}
 
-    note_ids, label = resolve_targets(client, query, presets)
+    note_ids, label = resolve_targets(client, query)
     print('%s -> нот: %d' % (label, len(note_ids)))
     if not note_ids:
         print('запит нічого не знайшов')
@@ -102,7 +94,7 @@ def run(query, settings, client):
 
     notes = client.notes_info(note_ids)
     config.verify_presets(
-        presets,
+        [config.PRESET],
         {note['modelName'] for note in notes},
         lambda model: client.call('modelFieldNames', modelName=model),
         'cards',
@@ -117,7 +109,7 @@ def run(query, settings, client):
         candidates.append(note)
 
     for model, count in sorted(skipped.items()):
-        print('пропущено %d нот типу %s – пресет без [cards]' % (count, model))
+        print('пропущено %d нот типу %s' % (count, model))
     if not candidates:
         print('жодної придатної ноти')
         return False

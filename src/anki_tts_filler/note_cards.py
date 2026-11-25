@@ -1,8 +1,7 @@
 """Turning Anki notes into cards with separate target and native sides.
 
-The field schema comes from the [audio] section in presets/*.toml: target is
-the side in the language being learnt, native is the translation, examples is
-the field with examples. No specific language appears here: they are set by the
+Поля беруться з ``config.PRESET``: target - сторона мови, яку вчать, native -
+переклад, examples - поле з прикладами. No specific language appears here: they are set by the
 voices in settings.toml.
 """
 
@@ -36,8 +35,8 @@ SORT_TAIL = 'zz%02d'
 def load_field_map(presets):
     """presets (config.Preset) -> {model_name: {'sides': {...}, 'examples': field}}.
 
-    The fields come from the [audio] section of a preset, while ready
-    [sound:...] tags are looked up through the mapping from [cards]. A preset
+    Поля беруться з ``audio_*`` пресету, а готові [sound:...] шукаються за
+    мапінгом ``cards``. A preset
     without both sides does not serve the audio mode - notes of that type are
     skipped, as is an unknown modelName.
     """

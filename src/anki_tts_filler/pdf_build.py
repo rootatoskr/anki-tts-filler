@@ -1,9 +1,8 @@
 """A printed version of the same selection as the audio mode.
 
-The same Anki query and the same presets, but instead of concatenating mp3
-files - a page for printing: the fields from the [pdf] fields list, each on its
-own line, cards one after another. There is no split into target and native
-sides here - the fields follow one another in the order written in the preset.
+Той самий Anki-запит і та сама схема, але замість склейки mp3 - сторінка на
+друк: поля з ``config.PRESET.pdf_fields``, кожне окремим рядком, картки одна за
+одною. Поділу на target і native тут нема - поля йдуть у порядку зі списку.
 
 HTML is an intermediate format here: headless Chrome turns it into a PDF, so
 that no dependency is pulled into the project just for printing, after which
@@ -147,7 +146,7 @@ def to_pdf(chrome, html_path, profile_dir):
 
 
 def run(query, settings, client):
-    presets = config.load_all_presets()
+    presets = [config.PRESET]
     index = {preset.model_name: preset.pdf_fields for preset in presets if preset.pdf_fields}
 
     note_ids = client.find_notes(query)

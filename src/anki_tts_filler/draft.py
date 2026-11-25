@@ -6,8 +6,8 @@ a value is removed, a dash becomes an en dash (with a space on each side), and
 whatever is wrapped in double parentheses goes into note.
 
 Parsing follows the Cyrillic/Latin script boundary, so it works instantly and
-deterministically, with no AI. The mode is deliberately narrow - only the base
-preset, with the fields production, recognition and note.
+deterministically, with no AI. The mode is deliberately narrow - only the
+fields production, recognition and note.
 """
 
 import re
@@ -16,10 +16,6 @@ SOURCE_FIELD = 'recognition'
 TARGET_FIELD = 'production'
 NOTE_FIELD = 'note'
 FIELDS = (SOURCE_FIELD, TARGET_FIELD, NOTE_FIELD)
-
-# The mode is bound to a single preset: the field names above are the concrete
-# fields of base, and for another notetype they would simply be untrue
-PRESET_NAME = 'base'
 
 CYRILLIC_CHAR_RE = re.compile(r'[Ѐ-ӿ]')
 # Latin including the extended letters (æ, ø, å and the like)

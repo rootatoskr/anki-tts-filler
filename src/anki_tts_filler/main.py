@@ -4,16 +4,14 @@ Anki through AnkiConnect: filling cards with TTS audio and building audio for
 listening out of notes that already exist.
 
 Usage:
-    uv run anki-tts-filler cards <preset>
+    uv run anki-tts-filler cards
     uv run anki-tts-filler audio '<query>'
     uv run anki-tts-filler pdf '<query>'
 
-Anki has to be running with the AnkiConnect add-on enabled. The field schema
-(which deck/notetype, which fields hold the target language, the translation
-and the audio) is shared by every mode in presets/<preset>.toml, while the
-voices and the AnkiConnect address live in settings.toml. No specific language
-appears in the code: the sides are called target (the language being learnt)
-and native (the language already known).
+Anki має бути відкритий з увімкненим аддоном AnkiConnect. Тип нот один: його
+схема (колода, нотетайп, поля) задана в config.PRESET і спільна для всіх
+режимів, а голоси й адреса AnkiConnect - у settings.toml. Сторони картки
+називаються target (мова, яку вчать) і native (мова, якою знають).
 
 cards mode: the card list is pasted into cards.txt (in the launch directory)
 and new notes are added to Anki. Tags come from a "tags: a b" line in a card
@@ -27,15 +25,10 @@ language again). Voice and gap settings live in settings.toml.
 pdf mode: the same selection as audio, but for printing - every card field on
 its own line.
 
-mirror mode: note duplicates in a reverse-direction notetype - the field pair
-from the preset [mirror] section is swapped. The target is given the same way
-as in resync.
-
-resync mode: the argument is a preset name (every note of its notetype) or the
-same Anki query as in audio/pdf; with no argument the list of presets is
-printed. The audio fields from the preset [cards] section are re-synthesised
-from the current text of the matching fields of notes that already exist - for
-a card edited by hand after it was created.
+resync mode: без аргументу - всі ноти типу з config.PRESET, з аргументом - той
+самий Anki-запит, що й в audio/pdf. Аудіополя переозвучуються за поточним
+текстом відповідних полів уже створених нот - для картки, яку відредагували
+вручну.
 
 """
 
@@ -43,39 +36,36 @@ import asyncio
 import sys
 import os
 
-from . import config, audio_build, draft, mirror, pdf_build, resync
+from . import config, audio_build, draft, pdf_build, resync
 from .parser import split_cards, build_fields
 from .audio import cache_path, sound_tag, ffmpeg_available, sync_media
 from .note_cards import tts_text
 from .ankiconnect import AnkiConnect, AnkiConnectError
 from .audio_build import AudioError
-from .mirror import MirrorError
 from .pdf_build import PdfError
 from .resync import ResyncError
 from .config import SettingsError
 from .tts_cache import TtsError
 
-MODES = ('cards', 'audio', 'pdf', 'resync', 'mirror', 'draft')
+MODES = ('cards', 'audio', 'pdf', 'resync', 'draft')
 
 
 def usage():
     print('Використання:')
-    print('  anki cards <preset> [--tag <назва>]...')
+    print('  anki cards [--tag <назва>]...')
     print("  anki audio '<query>'")
     print("  anki pdf '<query>'")
-    print("  anki resync <preset> | '<query>'")
-    print("  anki mirror <preset> | '<query>' [--tag <назва>]...")
+    print("  anki resync ['<query>']")
     print('  anki draft')
     print()
     print('Приклади:')
-    print('  anki cards base --tag no_fargene kapittel_9')
+    print('  anki cards --tag no_fargene kapittel_9')
     print("  anki audio 'tag:no\\_fargene'")
-    print("  anki pdf 'deck:language-no::no-verb'")
-    print('  anki resync base')
+    print("  anki pdf 'deck:language-no::no-base'")
+    print('  anki resync')
     print("  anki resync 'nid:1790316425552'")
-    print("  anki mirror 'tag:no\\_fargene' --tag mirrored")
     print()
-    print("Запит: tag:no\\_fargene, deck:language-no::no-verb, nid:<id>, note:<notetype>")
+    print("Запит: tag:no\\_fargene, deck:language-no::no-base, nid:<id>, note:<notetype>")
     print('Теги в cards.txt: рядок "tags: no_fargene kapittel_9" усередині картки')
 
 
@@ -90,12 +80,10 @@ def connect(url):
 
 
 def parse_cards_args(rest, mode):
-    """Arguments of the cards and mirror modes -> (positional ones, tags).
+    """Arguments of the cards mode -> (positional ones, tags).
 
     ``--tag`` takes every following word up to the next flag, so tags can be
-    written the way Anki itself separates them - by spaces. That makes the flag
-    greedy: a positional argument placed after it is read as one more tag, and
-    the missing target is then reported by the caller.
+    written the way Anki itself separates them - by spaces.
     """
     positional = []
     tags = []
@@ -113,25 +101,18 @@ def parse_cards_args(rest, mode):
                 sys.exit(1)
             continue
         if item.startswith('-'):
-            print("Невідомий прапорець %s. Використання: anki %s <ціль> [--tag <назва>]..." % (item, mode))
+            print("Невідомий прапорець %s. Використання: anki %s [--tag <назва>]..." % (item, mode))
             sys.exit(1)
         positional.append(item)
         index += 1
     return positional, tags
 
 
-def single_target(positional, mode):
-    """The one positional argument of a mode, with extras reported.
-
-    Without this check a second positional argument was dropped in silence:
-    ``--tag a b`` left ``b`` as a positional, and only the first tag was applied.
-    """
-    if len(positional) > 1:
-        print('Зайвий аргумент %s. Ціль одна, а теги йдуть після --tag: anki %s <ціль> --tag a b' % (
-            positional[1], mode,
-        ))
+def reject_positional(positional, mode):
+    # Режим не має позиційних аргументів: мовчки відкинутий аргумент виглядав би як застосований
+    if positional:
+        print('Зайвий аргумент %s. Теги йдуть після --tag: anki %s --tag a b' % (positional[0], mode))
         sys.exit(1)
-    return positional
 
 
 def require_query(rest, mode):
@@ -139,25 +120,6 @@ def require_query(rest, mode):
         print("Запит не вказано. Використання: anki %s '<query>'" % mode)
         sys.exit(1)
     return rest[0]
-
-
-def resolve_preset(rest):
-    # With no argument, list the available presets: the field schema is no longer one per project
-    names = config.list_presets()
-    if not names:
-        path = config.create_template()
-        print(f'Створено {path}. Пресет потрібно заповнити і запустити скрипт повторно.')
-        sys.exit(0)
-    if len(rest) < 1:
-        print('Пресет не вказано. Доступні:')
-        for name in names:
-            print(f'  {name}')
-        print(f'\nЗапуск: anki cards {names[0]}')
-        sys.exit(1)
-    if rest[0] not in names:
-        print(f'Пресет "{rest[0]}" не знайдено. Доступні: {", ".join(names)}')
-        sys.exit(1)
-    return config.load_preset(rest[0])
 
 
 def read_cards(input_path):
@@ -209,7 +171,8 @@ def card_label(card, text_fields):
 
 def main_cards(rest):
     positional, cli_tags = parse_cards_args(rest, 'cards')
-    preset = resolve_preset(single_target(positional, 'cards'))
+    reject_positional(positional, 'cards')
+    preset = config.PRESET
     settings = load_settings_or_exit()
     client = connect(settings.anki_url)
 
@@ -217,17 +180,16 @@ def main_cards(rest):
         print('Не знайдено ffmpeg – він потрібен для обрізання тиші в згенерованому аудіо.')
         sys.exit(1)
 
-    # Anki creates a missing deck silently, so a preset with an unfilled
-    # deck_name would otherwise pour notes into a freshly made "MyDeck::MySubdeck"
+    # Anki мовчки створює відсутню колоду, тож перейменована колода дала б нову замість помилки
     if preset.deck_name not in client.call('deckNames'):
-        print(f'Колоди "{preset.deck_name}" немає в Anki – треба або створити її, або виправити deck_name у presets/{preset.name}.toml.')
+        print(f'Колоди "{preset.deck_name}" немає в Anki – треба або створити її, або виправити deck_name у config.py.')
         sys.exit(1)
 
     model_fields = client.call('modelFieldNames', modelName=preset.model_name)
     # A typo in a field name would otherwise leave that field empty in every new note
     missing = config.missing_fields(preset, model_fields, 'cards')
     if missing:
-        print(f'presets/{preset.name}.toml: нотетайп {preset.model_name} не має полів: {", ".join(missing)}')
+        print(f'config.py: нотетайп {preset.model_name} не має полів: {", ".join(missing)}')
         sys.exit(1)
 
     # Fields typed by hand in cards.txt - every notetype field except the generated audio ones
@@ -358,10 +320,6 @@ def main_draft(rest):
     if rest:
         print('anki draft не приймає аргументів.')
         sys.exit(1)
-    if draft.PRESET_NAME not in config.list_presets():
-        print(f'Пресет {draft.PRESET_NAME} не знайдено в presets/.')
-        sys.exit(1)
-
     # Anki is not needed here: the mode only rewrites a text file, and field
     # names are checked against the notetype on the cards run anyway
     raw = read_draft()
@@ -385,46 +343,13 @@ def main_draft(rest):
     )
 
 
-def resolve_target(rest, mode):
-    """The argument of the resync and mirror modes: a preset name or an Anki query.
-
-    With no argument the list of presets is printed - the same way cards does
-    with a preset name.
-    """
-    if rest:
-        return rest[0]
-
-    names = config.list_presets()
-    if not names:
-        path = config.create_template()
-        print(f'Створено {path}. Пресет потрібно заповнити і запустити скрипт повторно.')
-        sys.exit(0)
-    print('Ціль не вказано. Доступні пресети:')
-    for name in names:
-        print(f'  {name}')
-    print(f'\nЗапуск: anki {mode} {names[0]}')
-    print(f"Або Anki-запит: anki {mode} 'nid:1234567890'")
-    sys.exit(1)
-
-
 def main_resync(rest):
-    query = resolve_target(rest, 'resync')
+    query = rest[0] if rest else None
 
     settings = load_settings_or_exit()
     client = connect(settings.anki_url)
 
     if not resync.run(query, settings, client):
-        sys.exit(1)
-
-
-def main_mirror(rest):
-    positional, cli_tags = parse_cards_args(rest, 'mirror')
-    query = resolve_target(single_target(positional, 'mirror'), 'mirror')
-
-    settings = load_settings_or_exit()
-    client = connect(settings.anki_url)
-
-    if not mirror.run(query, settings, client, cli_tags):
         sys.exit(1)
 
 
@@ -445,7 +370,7 @@ def main():
 
     mode = sys.argv[1]
     rest = sys.argv[2:]
-    # Expected failures (an error in settings.toml or a preset, no ffmpeg, an
+    # Expected failures (an error in settings.toml or the notetype fields, no ffmpeg, an
     # edge-tts failure, a lost AnkiConnect link) print as a line, not a traceback
     try:
         if mode == 'cards':
@@ -456,11 +381,9 @@ def main():
             main_pdf(rest)
         elif mode == 'resync':
             main_resync(rest)
-        elif mode == 'mirror':
-            main_mirror(rest)
         else:
             main_draft(rest)
-    except (SettingsError, AnkiConnectError, AudioError, MirrorError, PdfError, ResyncError, TtsError) as exc:
+    except (SettingsError, AnkiConnectError, AudioError, PdfError, ResyncError, TtsError) as exc:
         print('помилка: %s' % exc, file=sys.stderr)
         return 1
     except KeyboardInterrupt:

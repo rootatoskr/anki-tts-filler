@@ -1,12 +1,10 @@
 import os
-import re
 import tomllib
 from dataclasses import dataclass, field, fields, is_dataclass
 
 INPUT_FILE = 'cards.txt'
 # Raw list for the draft mode: read from there, written into INPUT_FILE
 DRAFT_FILE = 'draft.txt'
-PRESETS_DIR = 'presets'
 SETTINGS_FILE = 'settings.toml'
 
 # Name prefix of the generated mp3 files in the Anki media
@@ -26,52 +24,11 @@ LANG_NATIVE = 'native'
 ORDER_LINEAR = 'linear'
 ORDER_RANDOM = 'random'
 ORDER_SORTED = 'sorted'
-ORDERS = (ORDER_LINEAR, ORDER_RANDOM, ORDER_SORTED)
 
 ERROR_LINES = {
     'Невідомий вхід.',
     'Граматична функція, картка не потрібна.',
 }
-
-PRESET_TEMPLATE = '''# Мають точно збігатися з назвами вже створених у Anki колоди й notetype
-deck_name = "MyDeck::MySubdeck"
-model_name = "MyNoteType"
-
-# Поля кожен режим бере зі своєї секції. Секції немає - режим цей тип ноти
-# не обслуговує. Назви полів звіряються з нотетайпом у Anki при запуску.
-
-# Режим cards: аудіополе = текстове поле, з якого згенерувати аудіо. Решта
-# полів нотетайпу вводяться вручну в cards.txt, у будь-якому порядку.
-[cards]
-audio_field_one = "field_one"
-
-# Режим audio: target - сторона мови, яку вчать, native - переклад. Порядок
-# полів у списку = черга озвучення. Готові [sound:...] беруться за мапінгом
-# із секції [cards].
-# examples - поле з прикладами "цільова мова - переклад" через en dash;
-# кожна пара стає окремою карткою. Без ключа приклади не озвучуються.
-# order - порядок карток: "linear" (як у Anki), "random" (для фонового
-# слухання, щоб не вчилася послідовність) або "sorted" (за абеткою).
-[audio]
-order = "linear"
-target = ["field_one"]
-native = ["field_translation"]
-examples = "note"
-
-# Режим pdf: рядки картки в цьому ж порядку. Порожнє поле рядка не дає.
-# order - для шпаргалки зазвичай "sorted": картки за абеткою першого рядка.
-[pdf]
-order = "sorted"
-fields = ["field_one", "field_translation", "note"]
-
-# Режим mirror: дублікати цих нот у нотетайп зворотного напрямку.
-# preset - пресет, куди писати (його deck_name і model_name мають існувати
-# в Anki). swap - рівно два поля, що міняються місцями. Секції немає - режим
-# цей тип ноти не обслуговує.
-# [mirror]
-# preset = "example-rev"
-# swap = ["field_one", "field_translation"]
-'''
 
 SETTINGS_TEMPLATE = '''# Налаштування усіх режимів. Режими cards і resync беруть звідси anki_url,
 # concurrency і голос цільової мови (voice.target, voice.rate_target,
@@ -284,49 +241,27 @@ def load_settings(path=None):
     return settings
 
 
-# The markdown escape "\_" breaks TOML parsing of key = "value" lines, so it is removed before tomllib.loads
-_ESCAPED_VALUE_RE = re.compile(r'(?m)^(\w+\s*=\s*")(.*)(")$')
-
-# Allows deck_name to be given as a separate "deck:value" line, without quotes or "="
-_DECK_LINE_RE = re.compile(r'(?m)^deck\s*:\s*(.+)$')
-
-_DECK_PREFIX_RE = re.compile(r'^deck\s*:\s*')
-
-# Top-level preset keys and the sections parsed by ``_parse_sections``
-PRESET_KEYS = ('deck_name', 'model_name')
-PRESET_SECTIONS = ('cards', 'audio', 'pdf', 'mirror')
-
-# Renamed preset keys: path of the old one -> the new one
-RENAMED_PRESET_KEYS = {
-    'audio.no': 'audio.target',
-    'audio.uk': 'audio.native',
-}
-
-
 class PresetError(SettingsError):
     pass
 
 
+@dataclass(frozen=True)
 class Preset:
-    def __init__(self, name, deck_name, model_name, cards, audio_target, audio_native, audio_examples, audio_order, pdf_fields, pdf_order, mirror_preset, mirror_swap):
-        self.name = name
-        self.deck_name = deck_name
-        self.model_name = model_name
-        # cards: {audio field: text field}; the rest are field lists in output order
-        self.cards = cards
-        # target - the side in the language being learnt, native - the translation
-        self.audio_target = audio_target
-        self.audio_native = audio_native
-        # field with "target language - translation" examples; empty means no examples
-        self.audio_examples = audio_examples
-        self.pdf_fields = pdf_fields
-        # card order separately per mode: listening and printing need different
-        # things - random against a stable alphabet
-        self.audio_order = audio_order
-        self.pdf_order = pdf_order
-        # mirror mode: where to write the duplicates and which field pair to swap
-        self.mirror_preset = mirror_preset
-        self.mirror_swap = mirror_swap
+    """Схема єдиного типу нот: колода, нотетайп і поля кожного режиму.
+
+    ``cards`` - це {аудіополе: текстове поле}, решта - списки полів у порядку
+    виводу. Порожній ``audio_examples`` означає, що приклади не озвучуються.
+    """
+
+    deck_name: str
+    model_name: str
+    cards: dict
+    audio_target: list
+    audio_native: list
+    pdf_fields: list
+    audio_examples: str = ''
+    audio_order: str = ORDER_LINEAR
+    pdf_order: str = ORDER_LINEAR
 
     def order_for(self, mode):
         return self.audio_order if mode == 'audio' else self.pdf_order
@@ -338,7 +273,7 @@ class Preset:
     def mode_fields(self, mode):
         """The fields a given mode needs - only those are worth checking.
 
-        The audio mode also adds the audio fields from [cards]: without them the
+        The audio mode also adds the audio fields from ``cards``: without them the
         ready [sound:...] tags are not found and everything is quietly
         synthesised again through TTS.
         """
@@ -346,8 +281,6 @@ class Preset:
             return set(self.cards) | set(self.cards.values())
         if mode == 'pdf':
             return set(self.pdf_fields)
-        if mode == 'mirror':
-            return set(self.mirror_swap)
         media = self.media_fields()
         used = set(self.audio_target) | set(self.audio_native)
         if self.audio_examples:
@@ -355,164 +288,23 @@ class Preset:
         return used | {media[name] for name in self.audio_target if name in media}
 
 
-def presets_path():
-    return os.path.abspath(PRESETS_DIR)
-
-
-def list_presets():
-    path = presets_path()
-    if not os.path.isdir(path):
-        return []
-    return sorted(f[:-len('.toml')] for f in os.listdir(path) if f.endswith('.toml'))
-
-
-def create_template():
-    # Creates presets/example.toml when no preset exists yet
-    path = presets_path()
-    os.makedirs(path, exist_ok=True)
-    target = os.path.join(path, 'example.toml')
-    with open(target, 'w', encoding='utf-8') as f:
-        f.write(PRESET_TEMPLATE)
-    return target
-
-
-def _normalize_name(value):
-    # Strips the "deck:" prefix and the markdown escape "\_" -> "_" in deck and notetype names
-    return _DECK_PREFIX_RE.sub('', value.strip()).replace('\\_', '_')
-
-
-def _string_list(raw, path, preset_name):
-    if not isinstance(raw, list) or not all(isinstance(item, str) for item in raw):
-        raise PresetError('%s: %s має бути списком назв полів' % (preset_name, path))
-    return raw
-
-
-def _section(schema, name, preset_name):
-    value = schema.get(name)
-    if value is None:
-        return {}
-    if not isinstance(value, dict):
-        raise PresetError('%s: [%s] має бути секцією' % (preset_name, name))
-    return value
-
-
-def _unknown_preset_keys(found, known, path, preset_name):
-    """Unknown keys as an error, with separate wording for renamed ones."""
-    unknown = sorted(set(found) - set(known))
-    if not unknown:
-        return
-    renamed = [
-        '%s -> %s' % (name, RENAMED_PRESET_KEYS['%s.%s' % (path, name)])
-        for name in unknown
-        if '%s.%s' % (path, name) in RENAMED_PRESET_KEYS
-    ]
-    if renamed:
-        raise PresetError('%s: у [%s] перейменовані ключі: %s' % (preset_name, path, ', '.join(renamed)))
-    raise PresetError('%s: у [%s] невідомі ключі: %s' % (preset_name, path, ', '.join(unknown)))
-
-
-def _parse_order(section, path, preset_name):
-    # Without the key it is linear: the order from Anki is predictable, the rest is opted into
-    order = section.get('order', ORDER_LINEAR)
-    if order not in ORDERS:
-        raise PresetError('%s: %s має бути одним із %s, а не %r' % (
-            preset_name, path, ', '.join('"%s"' % value for value in ORDERS), order,
-        ))
-    return order
-
-
-def _required_name(schema, key, preset_name):
-    """A required top-level string key.
-
-    Without this check a missing deck_name would fail with a KeyError, that is,
-    with a traceback instead of a message about an error in the preset.
-    """
-    value = schema.get(key)
-    if value is None:
-        raise PresetError('%s: немає обовʼязкового ключа %s' % (preset_name, key))
-    if not isinstance(value, str):
-        raise PresetError('%s: %s має бути рядком, а не %s' % (preset_name, key, type(value).__name__))
-    return value
-
-
-def _parse_mirror(section, preset_name):
-    """The [mirror] section -> (name of the receiving preset, field pair).
-
-    Exactly two fields in the pair: swapping three or more makes no sense, and
-    one would mean there is nothing to swap.
-    """
-    if not section:
-        return '', []
-
-    target = section.get('preset')
-    if not isinstance(target, str) or not target:
-        raise PresetError('%s: mirror.preset має бути назвою пресету' % preset_name)
-
-    swap = _string_list(section.get('swap', []), 'mirror.swap', preset_name)
-    if len(swap) != 2:
-        raise PresetError('%s: mirror.swap має містити рівно два поля, а не %d' % (preset_name, len(swap)))
-    if swap[0] == swap[1]:
-        raise PresetError('%s: mirror.swap містить те саме поле двічі' % preset_name)
-    return target, swap
-
-
-def _parse_sections(schema, preset_name):
-    """A preset -> card order and the fields for cards, audio and pdf.
-
-    An empty or missing section means the mode does not serve this note type.
-    Keys from the old schema are rejected explicitly rather than ignored.
-    """
-    for old in ('audio_fields', 'translation_field'):
-        if old in schema:
-            raise PresetError(
-                '%s: ключ %s зі старої схеми; поля тепер задаються секціями [cards], [audio], [pdf]'
-                % (preset_name, old)
-            )
-
-    if 'order' in schema:
-        raise PresetError(
-            '%s: order тепер задається окремо для кожного режиму - у секціях [audio] і [pdf]'
-            % preset_name
-        )
-
-    # A typo in a top-level key name (modle_name) would otherwise go unnoticed:
-    # model_name would come from the default, that is, from nowhere
-    unknown = sorted(set(schema) - set(PRESET_KEYS) - set(PRESET_SECTIONS))
-    if unknown:
-        raise PresetError('%s: невідомі ключі: %s' % (preset_name, ', '.join(unknown)))
-
-    cards = _section(schema, 'cards', preset_name)
-    for audio_field, text_field in cards.items():
-        if not isinstance(text_field, str):
-            raise PresetError('%s: [cards] %s має бути назвою текстового поля' % (preset_name, audio_field))
-
-    audio = _section(schema, 'audio', preset_name)
-    _unknown_preset_keys(audio, ('target', 'native', 'examples', 'order'), 'audio', preset_name)
-    audio_target = _string_list(audio.get('target', []), 'audio.target', preset_name)
-    audio_native = _string_list(audio.get('native', []), 'audio.native', preset_name)
-    audio_examples = audio.get('examples', '')
-    if not isinstance(audio_examples, str):
-        raise PresetError('%s: audio.examples має бути назвою поля' % preset_name)
-
-    pdf = _section(schema, 'pdf', preset_name)
-    _unknown_preset_keys(pdf, ('fields', 'order'), 'pdf', preset_name)
-    pdf_fields = _string_list(pdf.get('fields', []), 'pdf.fields', preset_name)
-
-    mirror = _section(schema, 'mirror', preset_name)
-    _unknown_preset_keys(mirror, ('preset', 'swap'), 'mirror', preset_name)
-    mirror_preset, mirror_swap = _parse_mirror(mirror, preset_name)
-
-    return (
-        cards,
-        audio_target,
-        audio_native,
-        audio_examples,
-        _parse_order(audio, 'audio.order', preset_name),
-        pdf_fields,
-        _parse_order(pdf, 'pdf.order', preset_name),
-        mirror_preset,
-        mirror_swap,
-    )
+# Єдиний тип нот проєкту. Назви мають збігатися з колодою й нотетайпом в Anki.
+# extra-поля озвучуються голосом цільової мови, як і recognition
+PRESET = Preset(
+    deck_name='language-no::no-base',
+    model_name='type-language-no-basic',
+    cards={
+        'audio': 'recognition',
+        'audio_extra-1': 'extra-1',
+        'audio_extra-2': 'extra-2',
+        'audio_extra-3': 'extra-3',
+        'audio_extra-4': 'extra-4',
+        'audio_extra-5': 'extra-5',
+    },
+    audio_target=['recognition'],
+    audio_native=['production'],
+    pdf_fields=['recognition', 'production', 'note'],
+)
 
 
 def orders(presets, mode):
@@ -537,56 +329,6 @@ def verify_presets(presets, models, fetch_fields, mode):
             continue
         missing = missing_fields(preset, fetch_fields(preset.model_name), mode)
         if missing:
-            raise PresetError('presets/%s.toml: нотетайп %s не має полів: %s' % (
-                preset.name, preset.model_name, ', '.join(missing),
+            raise PresetError('config.py: нотетайп %s не має полів: %s' % (
+                preset.model_name, ', '.join(missing),
             ))
-
-
-def load_preset(name):
-    with open(os.path.join(presets_path(), name + '.toml'), encoding='utf-8') as f:
-        raw = f.read()
-
-    raw = _ESCAPED_VALUE_RE.sub(lambda m: m.group(1) + m.group(2).replace('\\_', '_') + m.group(3), raw)
-
-    deck_override = None
-    match = _DECK_LINE_RE.search(raw)
-    if match:
-        deck_override = match.group(1)
-        raw = raw[:match.start()] + raw[match.end():]
-
-    schema = tomllib.loads(raw)
-    label = 'presets/%s.toml' % name
-    if deck_override is not None:
-        deck_name = deck_override
-        schema.pop('deck_name', None)
-    else:
-        deck_name = _required_name(schema, 'deck_name', label)
-
-    return Preset(
-        name,
-        _normalize_name(deck_name),
-        _normalize_name(_required_name(schema, 'model_name', label)),
-        *_parse_sections(schema, label),
-    )
-
-
-def load_all_presets():
-    """Every preset from presets/, with a check for a repeated notetype.
-
-    The audio, pdf and resync modes match a preset to a note by model_name, so
-    two presets for one notetype are not two options to choose from but one
-    quietly overwriting the other. The easiest way into that is to copy a preset
-    as the basis for a new one and forget to change model_name.
-    """
-    presets = [load_preset(name) for name in list_presets()]
-    owners = {}
-    for preset in presets:
-        first = owners.get(preset.model_name)
-        if first is not None:
-            raise PresetError(
-                'presets/%s.toml і presets/%s.toml заявляють той самий нотетайп %s; '
-                'режими audio, pdf і resync зіставляють пресети за model_name, '
-                'тож він має бути різний' % (first, preset.name, preset.model_name)
-            )
-        owners[preset.model_name] = preset.name
-    return presets
